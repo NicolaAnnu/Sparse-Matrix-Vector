@@ -1,16 +1,54 @@
-// C++ threads implementation for the SPM One-Shot project.
-// Uses the official usage() function provided by utils.hpp.
+// Thread-pool version of the Sparse Matrix-Vector multiplication.
 //
-// This version preserves the algorithm of iterative_SpMV.cpp and uses a
-// persistent thread pool. Work is split into chunks of -b logical rows.
+// tools used:
+//      threadpool: persistent fixed-size pool reused across all iterations
+//      packaged_task: used internally by submit() to wrap the tasks
+//      futures: used to wait for the completion of each parallel phase
+//      mutex + condition_variable: used to manage the shared task queue
+//      atomic counter: used to dynamically assign SpMV chunks to workers
 //
-// Synchronization does not rely on std::barrier:
-//   - mutex + condition_variable coordinate the shared task queue;
-//   - future::get() waits for each phase (SpMV, reduction, normalization).
+// questions:
+//      impact of futures and task-submission overhead
+//      impact of synchronization between SpMV, reduction, and scaling
+//      static partitioning vs dynamic chunk scheduling for SpMV
 //
-// Build:
-//   g++ -O3 -std=c++17 -pthread -I. -Wall -Wextra -Wpedantic
+// to analyze with experiments:
+//      best number of threads to use
+//      impact of nnz and mode
+//      impact of the SpMV chunk size
+//      static scheduling for regular workloads vs dynamic scheduling for irregular workloads
+//      cache locality and cold vs warm execution
+//      strong & weak scaling
+//
+//
+// Command line:
+//   -n  N          matrix size, NxN
+//   -nz K          total number of nonzeros
+//   -m  mode       regular | irregular
+//   -s  seed       optional seed, default 111
+//   -t  T          number of worker threads
+//   -b  B          number of logical rows contained in an SpMV chunk,
+//                  default 1024
+//   --dump-vector FILE
+//                  optional dump of the final normalized vector
+//
+// Minimal build:
+//   g++ -O3 -std=c++17 -pthread -I. -Wall -Wextra -Wpedantic 
 //       cpp_threads_SpMV.cpp -o cpp_threads
+//
+// Examples:
+//   ./cpp_threads -n 500000 -nz 20000000 -m regular -t 2
+//   ./cpp_threads -n 500000 -nz 20000000 -m irregular -t 4 -b 1024
+//   ./cpp_threads -n 5000 -nz 20000 -m irregular -t 2 -b 1024 --dump-vector thread_vec.dump
+//
+// Notes:
+//   - Matrix generation is not included in computation time and has its own timer.
+//   - The thread pool is created outside the timed iterative computation.
+//   - Dot product and vector scaling use static partitioning.
+//   - SpMV uses dynamic chunk scheduling.
+//   - The computation uses a fixed number of iterations.
+//   - The main workload is the irregular case.
+
 
 #include <algorithm>
 #include <chrono>
@@ -230,6 +268,7 @@ struct IterativeResult {
 static IterativeResult iterative_spmv_evolving(const CSRMatrix& A,
                                                std::uint64_t seed,
                                                ThreadPool& pool,
+                                               std::size_t worker_count,
                                                std::size_t chunk_size,
                                                std::vector<double>* final_vector = nullptr) {
     const std::size_t n = A.n;
@@ -244,7 +283,7 @@ static IterativeResult iterative_spmv_evolving(const CSRMatrix& A,
     for (double& v : x) {
         v = rng.next_unit();
     }
-    normalize(x, pool, chunk_size);
+    normalize(x, pool, worker_count);
 
     // PHASE 2: iterative computation on the evolving matrix.
     // The sequential reference keeps the CSR matrix fixed and represents matrix
@@ -259,16 +298,16 @@ static IterativeResult iterative_spmv_evolving(const CSRMatrix& A,
 
         // One iteration: shifted SpMV followed by vector normalization.
         // The normalization contains a global reduction.
-        spmv_csr_shifted_rows(A, row_shift, x, y, pool, chunk_size);
-        normalize(y, pool, chunk_size);
+        spmv_csr_shifted_rows(A, row_shift, x, y, pool,worker_count, chunk_size);
+        normalize(y, pool, worker_count);
 
         x.swap(y); // O(1), do not need to parallelize
     }
 
     // PHASE 3: final diagnostics for correctness checks.
     // The extra SpMV is used to compute the final Rayleigh-like value.
-    spmv_csr_shifted_rows(A, row_shift, x, y, pool, chunk_size);
-    const double rayleigh = dot(x, y, pool, chunk_size);
+    spmv_csr_shifted_rows(A, row_shift, x, y, pool,worker_count, chunk_size);
+    const double rayleigh = dot(x, y, pool, worker_count);
     const std::uint64_t checksum = checksum_vector(x);
 
     // Keep the final vector only if we have to dump it.
@@ -334,7 +373,7 @@ int main(int argc, char** argv) {
 
         // Phase 2: timed iterative computation.
         const auto tc0 = std::chrono::steady_clock::now();
-        const IterativeResult result = iterative_spmv_evolving(G.A, seed, pool, chunk_size, final_vector_out);
+        const IterativeResult result = iterative_spmv_evolving(G.A, seed, pool, worker_count, chunk_size, final_vector_out);
         const auto tc1 = std::chrono::steady_clock::now();
 
         const double computation_sec = std::chrono::duration<double>(tc1 - tc0).count();
