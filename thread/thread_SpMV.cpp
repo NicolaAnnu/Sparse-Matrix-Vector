@@ -17,14 +17,11 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
-#include <functional>
 #include <future>
 #include <iomanip>
 #include <iostream>
-#include <limits>
 #include <stdexcept>
 #include <string>
-#include <thread>
 #include <utility>
 #include <vector>
 
@@ -34,13 +31,6 @@
 
 static constexpr std::uint32_t NUM_ITERS = 500;
 static constexpr std::uint32_t EPOCH_LEN = 25;
-
-static std::size_t checked_size_t(std::uint64_t value, const char* name) {
-    if (value > static_cast<std::uint64_t>(std::numeric_limits<std::size_t>::max())) {
-        throw std::runtime_error(std::string(name) + " does not fit in size_t");
-    }
-    return static_cast<std::size_t>(value);
-}
 
 static std::size_t compute_shift_rows(std::size_t n) {
     std::size_t shift = n / 16 + 17;
@@ -59,11 +49,9 @@ static std::size_t chunk_count(std::size_t item_count, std::size_t chunk_size) {
 }
 
 template <class ChunkFunction>
-static void parallel_for_chunks(ThreadPool& pool,
-                                std::size_t item_count,
-                                std::size_t chunk_size,
-                                ChunkFunction&& function) {
+static void parallel_for_chunks(ThreadPool& pool, std::size_t item_count, std::size_t chunk_size, ChunkFunction&& function) {
     const std::size_t number_of_chunks = chunk_count(item_count, chunk_size);
+    
     std::vector<std::future<void>> completions;
     completions.reserve(number_of_chunks);
 
@@ -83,14 +71,8 @@ static void parallel_for_chunks(ThreadPool& pool,
     }
 }
 
-static double parallel_dot(const std::vector<double>& a,
-                           const std::vector<double>& b,
-                           ThreadPool& pool,
-                           std::size_t chunk_size) {
-    if (a.size() != b.size()) {
-        throw std::runtime_error("dot product vectors have different sizes");
-    }
-
+static double dot(const std::vector<double>& a, const std::vector<double>& b, ThreadPool& pool, std::size_t chunk_size) {
+    
     const std::size_t number_of_chunks = chunk_count(a.size(), chunk_size);
     std::vector<std::future<double>> partial_results;
     partial_results.reserve(number_of_chunks);
@@ -117,25 +99,16 @@ static double parallel_dot(const std::vector<double>& a,
     return total;
 }
 
-static void parallel_scale(std::vector<double>& vector,
-                           double factor,
-                           ThreadPool& pool,
-                           std::size_t chunk_size) {
-    parallel_for_chunks(
-        pool,
-        vector.size(),
-        chunk_size,
-        [&vector, factor](std::size_t begin, std::size_t end) {
+static void parallel_scale(std::vector<double>& vector, double factor, ThreadPool& pool, std::size_t chunk_size) {
+    parallel_for_chunks(pool, vector.size(), chunk_size, [&vector, factor](std::size_t begin, std::size_t end) {
             for (std::size_t i = begin; i < end; ++i) {
                 vector[i] *= factor;
             }
         });
 }
 
-static void parallel_normalize(std::vector<double>& vector,
-                               ThreadPool& pool,
-                               std::size_t chunk_size) {
-    const double norm = std::sqrt(parallel_dot(vector, vector, pool, chunk_size));
+static void normalize(std::vector<double>& vector, ThreadPool& pool, std::size_t chunk_size) {
+    const double norm = std::sqrt(dot(vector, vector, pool, chunk_size));
     if (!(norm > 0.0) || !std::isfinite(norm)) {
         throw std::runtime_error("cannot normalize vector: invalid L2 norm");
     }
@@ -143,7 +116,7 @@ static void parallel_normalize(std::vector<double>& vector,
     parallel_scale(vector, 1.0 / norm, pool, chunk_size);
 }
 
-static void parallel_spmv_shifted_rows(const CSRMatrix& matrix,
+static void spmv_csr_shifted_rows(const CSRMatrix& matrix,
                                        std::size_t row_shift,
                                        const std::vector<double>& x,
                                        std::vector<double>& y,
@@ -156,11 +129,7 @@ static void parallel_spmv_shifted_rows(const CSRMatrix& matrix,
     // Preserve the behavior of the sequential reference implementation.
     y.assign(matrix.n, 0.0);
 
-    parallel_for_chunks(
-        pool,
-        matrix.n,
-        chunk_size,
-        [&matrix, row_shift, &x, &y](std::size_t begin, std::size_t end) {
+    parallel_for_chunks(pool, matrix.n, chunk_size, [&matrix, row_shift, &x, &y](std::size_t begin, std::size_t end) {
             const std::size_t n = matrix.n;
 
             for (std::size_t logical_row = begin; logical_row < end; ++logical_row) {
@@ -168,9 +137,7 @@ static void parallel_spmv_shifted_rows(const CSRMatrix& matrix,
                     (logical_row + n - row_shift) % n;
 
                 double sum = 0.0;
-                for (std::uint64_t position = matrix.row_ptr[source_row];
-                     position < matrix.row_ptr[source_row + 1];
-                     ++position) {
+                for (std::uint64_t position = matrix.row_ptr[source_row]; position < matrix.row_ptr[source_row + 1]; ++position) {
                     sum += matrix.values[position] * x[matrix.col_idx[position]];
                 }
 
@@ -180,127 +147,137 @@ static void parallel_spmv_shifted_rows(const CSRMatrix& matrix,
 }
 
 struct IterativeResult {
-    double rayleigh = 0.0;
-    std::uint64_t checksum = 0;
+    double rayleigh             = 0.0;
+    std::uint64_t checksum      = 0;
     std::size_t final_row_shift = 0;
 };
 
-static IterativeResult iterative_spmv_evolving_threads(
-    const CSRMatrix& matrix,
-    std::uint64_t seed,
-    std::size_t worker_count,
-    std::size_t chunk_size,
-    std::vector<double>* final_vector = nullptr) {
-
-    const std::size_t n = matrix.n;
+static IterativeResult iterative_spmv_evolving(const CSRMatrix& A,
+                                               std::uint64_t seed,
+                                               ThreadPool& pool,
+                                               std::size_t chunk_size,
+                                               std::vector<double>* final_vector = nullptr) {
+    const std::size_t n = A.n;
     const std::size_t shift_rows = compute_shift_rows(n);
 
+    // PHASE 1: initialize the vector used by the iterative method.
+    // Parallel versions must preserve this initialization, or distribute the same initial vector, before entering the timed iterative loop.
     std::vector<double> x(n);
     std::vector<double> y(n);
 
-    SplitMix64 random(seed ^ 0x123456789abcdef0ULL);
-    for (double& value : x) {
-        value = random.next_unit();
+    SplitMix64 rng(seed ^ 0x123456789abcdef0ULL);
+    for (double& v : x) {
+        v = rng.next_unit();
     }
+    normalize(x, pool, chunk_size);
 
-    // Workers are created once and reused throughout all iterations.
-    ThreadPool pool(worker_count);
-    parallel_normalize(x, pool, chunk_size);
-
+    // PHASE 2: iterative computation on the evolving matrix.
+    // The sequential reference keeps the CSR matrix fixed and represents matrix
+    // evolution through this logical row_shift value.
     std::size_t row_shift = 0;
 
-    for (std::uint32_t iteration = 0; iteration < NUM_ITERS; ++iteration) {
-        if (iteration > 0 && (iteration % EPOCH_LEN) == 0) {
+    for (std::uint32_t iter = 0; iter < NUM_ITERS; ++iter) {
+        // At each epoch boundary, update the logical row mapping.
+        if (iter > 0 && (iter % EPOCH_LEN) == 0) {
             row_shift = (row_shift + shift_rows) % n;
         }
 
-        parallel_spmv_shifted_rows(matrix, row_shift, x, y, pool, chunk_size);
-        parallel_normalize(y, pool, chunk_size);
-        x.swap(y);
+        // One iteration: shifted SpMV followed by vector normalization.
+        // The normalization contains a global reduction.
+        spmv_csr_shifted_rows(A, row_shift, x, y, pool, chunk_size);
+        normalize(y, pool, chunk_size);
+
+        x.swap(y); // O(1), do not need to parallelize
     }
 
-    parallel_spmv_shifted_rows(matrix, row_shift, x, y, pool, chunk_size);
-    const double rayleigh = parallel_dot(x, y, pool, chunk_size);
+    // PHASE 3: final diagnostics for correctness checks.
+    // The extra SpMV is used to compute the final Rayleigh-like value.
+    spmv_csr_shifted_rows(A, row_shift, x, y, pool, chunk_size);
+    const double rayleigh = dot(x, y, pool, chunk_size);
     const std::uint64_t checksum = checksum_vector(x);
 
+    // Keep the final vector only if we have to dump it.
     if (final_vector != nullptr) {
         *final_vector = std::move(x);
     }
 
-    return IterativeResult{rayleigh, checksum, row_shift};
+    return IterativeResult{
+        rayleigh,
+        checksum,
+        row_shift
+    };
 }
 
 int main(int argc, char** argv) {
-    std::uint64_t n64 = 0;
-    std::uint64_t nonzeros = 0;
+    // Phase 0: read problem size, sparsity mode, seed, and optional dump path.
+    std::uint64_t n64  = 0;
+    std::uint64_t nz   = 0;
     std::uint64_t seed = 111;
-    std::uint64_t workers64 = 0;
-    std::uint64_t chunk_size64 = 64;
     std::string mode;
     std::string dump_vector_path;
+    std::uint64_t block_size64 = 1024;
+    std::uint64_t num_threads = 0;
 
     if (!read_arg_u64(argc, argv, "-n", n64) ||
-        !read_arg_u64(argc, argv, "-nz", nonzeros) ||
+        !read_arg_u64(argc, argv, "-nz", nz) ||
         !read_arg_str(argc, argv, "-m", mode) ||
-        !read_arg_u64(argc, argv, "-t", workers64)) {
+        !read_arg_u64(argc, argv, "-t", num_threads)) {
         usage(argv[0]);
         return 1;
     }
-
+    // Optional arguments
     (void)read_arg_u64(argc, argv, "-s", seed);
-    (void)read_arg_u64(argc, argv, "-b", chunk_size64);
+    (void)read_arg_u64(argc, argv, "-b", block_size64);
     (void)read_arg_str(argc, argv, "--dump-vector", dump_vector_path);
 
+    const std::size_t n = static_cast<std::size_t>(n64);
+
+    const std::size_t worker_count = static_cast<std::size_t>(num_threads);
+
+    const std::size_t chunk_size = static_cast<std::size_t>(block_size64);
+
+    std::cout << "SPARSE_ITERATION_THREADPOOL\n";
+    std::cout
+        << "threads=" << worker_count
+        << "  block_rows=" << chunk_size << "\n";
+
     try {
-        const std::size_t n = checked_size_t(n64, "n");
-        const std::size_t worker_count = checked_size_t(workers64, "thread count");
-        const std::size_t chunk_size = checked_size_t(chunk_size64, "chunk size");
+        ThreadPool pool(worker_count);
 
-        std::cout << "SPARSE_ITERATION_CPP_THREADS_POOL\n";
-        std::cout << "threads=" << worker_count
-                  << "  block_rows=" << chunk_size << "\n";
+        // Phase 1: input construction. 
+        const auto tg0 = std::chrono::steady_clock::now();
+        const GeneratedMatrix G = generate_matrix(n, nz, seed, mode);
+        const auto tg1 = std::chrono::steady_clock::now();
 
-        const auto generation_start = std::chrono::steady_clock::now();
-        const GeneratedMatrix generated = generate_matrix(n, nonzeros, seed, mode);
-        const auto generation_end = std::chrono::steady_clock::now();
+        const double generation_sec = std::chrono::duration<double>(tg1 - tg0).count();
 
-        const double generation_seconds =
-            std::chrono::duration<double>(generation_end - generation_start).count();
+        print_matrix_stats(G);
+        std::cout << "generation_time_sec=" << generation_sec << "\n\n";
 
-        print_matrix_stats(generated);
-        std::cout << "generation_time_sec=" << generation_seconds << "\n\n";
+        std::vector<double>  final_vector;
+        std::vector<double>* final_vector_out = dump_vector_path.empty() ? nullptr : &final_vector;
 
-        std::vector<double> final_vector;
-        std::vector<double>* final_vector_output =
-            dump_vector_path.empty() ? nullptr : &final_vector;
+        // Phase 2: timed iterative computation.
+        const auto tc0 = std::chrono::steady_clock::now();
+        const IterativeResult result = iterative_spmv_evolving(G.A, seed, pool, chunk_size, final_vector_out);
+        const auto tc1 = std::chrono::steady_clock::now();
 
-        const auto computation_start = std::chrono::steady_clock::now();
-        const IterativeResult result = iterative_spmv_evolving_threads(
-            generated.A,
-            seed,
-            worker_count,
-            chunk_size,
-            final_vector_output);
-        const auto computation_end = std::chrono::steady_clock::now();
-
-        const double computation_seconds =
-            std::chrono::duration<double>(computation_end - computation_start).count();
+        const double computation_sec = std::chrono::duration<double>(tc1 - tc0).count();
 
         std::cout << std::setprecision(15);
         std::cout << "rayleigh=" << result.rayleigh << "\n";
         std::cout << "checksum=0x" << std::hex << result.checksum << std::dec << "\n";
-        std::cout << "final_row_shift=" << result.final_row_shift << "\n";
 
         std::cout << std::fixed << std::setprecision(6);
-        std::cout << "Time (sec) = " << computation_seconds << "\n";
+        std::cout << "Time (sec) = " << computation_sec << "\n";
 
-        // Dumping remains outside the measured region.
+        // Phase 3: optional correctness support. Vector dumping is outside the timed region
         if (!dump_vector_path.empty()) {
             dump_vector(dump_vector_path, final_vector);
             std::cout << "vector_dump=" << dump_vector_path << "\n";
         }
-    } catch (const std::exception& exception) {
-        std::cerr << "Error: " << exception.what() << "\n";
+    } catch (const std::exception& e) {
+        std::cerr << "Error: " << e.what() << "\n";
         return 1;
     }
 
