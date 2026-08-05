@@ -24,6 +24,7 @@
 #include <string>
 #include <utility>
 #include <vector>
+#include <atomic>
 
 #include "matrix_generation.hpp"
 #include "thread_pool.hpp"
@@ -44,19 +45,21 @@ static std::size_t compute_shift_rows(std::size_t n) {
     return shift;
 }
 
-static std::size_t chunk_count(std::size_t item_count, std::size_t chunk_size) {
-    return item_count / chunk_size + (item_count % chunk_size != 0 ? 1 : 0);
-}
+template <class Function>
+static void parallel_for_workers(
+    ThreadPool& pool,
+    std::size_t item_count,
+    std::size_t worker_count,
+    Function&& function)
+{
+    worker_count = std::min(worker_count, item_count);
 
-template <class ChunkFunction>
-static void parallel_for_chunks(ThreadPool& pool, std::size_t item_count, std::size_t chunk_size, ChunkFunction&& function) {
-    const std::size_t number_of_chunks = chunk_count(item_count, chunk_size);
-    
     std::vector<std::future<void>> completions;
-    completions.reserve(number_of_chunks);
+    completions.reserve(worker_count);
 
-    for (std::size_t begin = 0; begin < item_count; begin += chunk_size) {
-        const std::size_t end = std::min(begin + chunk_size, item_count);
+    for (std::size_t worker = 0; worker < worker_count; ++worker) {
+        const std::size_t begin = item_count * worker / worker_count;
+        const std::size_t end   = item_count * (worker + 1) / worker_count;
 
         completions.emplace_back(pool.submit(
             [begin, end, &function] {
@@ -64,86 +67,158 @@ static void parallel_for_chunks(ThreadPool& pool, std::size_t item_count, std::s
             }));
     }
 
-    // This loop is the phase synchronization point. If a worker task throws,
-    // get() also propagates the exception to the main thread.
-    for (std::future<void>& completion : completions) {
+    for (auto& completion : completions) {
         completion.get();
     }
 }
 
-static double dot(const std::vector<double>& a, const std::vector<double>& b, ThreadPool& pool, std::size_t chunk_size) {
-    
-    const std::size_t number_of_chunks = chunk_count(a.size(), chunk_size);
-    std::vector<std::future<double>> partial_results;
-    partial_results.reserve(number_of_chunks);
+struct alignas(64) PaddedDouble {
+    double value = 0.0;
+};
 
-    for (std::size_t begin = 0; begin < a.size(); begin += chunk_size) {
-        const std::size_t end = std::min(begin + chunk_size, a.size());
+static double dot(
+    const std::vector<double>& a,
+    const std::vector<double>& b,
+    ThreadPool& pool,
+    std::size_t worker_count)
+{
+    if (a.size() != b.size()) {
+        throw std::runtime_error("dot: incompatible vector sizes");
+    }
 
-        partial_results.emplace_back(pool.submit(
-            [&a, &b, begin, end] {
-                double partial = 0.0;
+    worker_count = std::min(worker_count, a.size());
+    std::vector<PaddedDouble> partial(worker_count);
+    std::vector<std::future<void>> completions;
+    completions.reserve(worker_count);
+
+    for (std::size_t worker = 0; worker < worker_count; ++worker) {
+        const std::size_t begin = a.size() * worker / worker_count;
+        const std::size_t end   = a.size() * (worker + 1) / worker_count;
+
+        completions.emplace_back(pool.submit(
+            [&a, &b, &partial, worker, begin, end] {
+                double local = 0.0;
+
                 for (std::size_t i = begin; i < end; ++i) {
-                    partial += a[i] * b[i];
+                    local += a[i] * b[i];
                 }
-                return partial;
+
+                partial[worker].value = local;
             }));
     }
 
-    // Futures are reduced in submission order. The order is deterministic for a
-    // fixed chunk size, although it differs from the sequential element order.
-    double total = 0.0;
-    for (std::future<double>& partial : partial_results) {
-        total += partial.get();
+    for (auto& completion : completions) {
+        completion.get();
     }
+
+    double total = 0.0;
+    for (const auto& value : partial) {
+        total += value.value;
+    }
+
     return total;
 }
 
-static void parallel_scale(std::vector<double>& vector, double factor, ThreadPool& pool, std::size_t chunk_size) {
-    parallel_for_chunks(pool, vector.size(), chunk_size, [&vector, factor](std::size_t begin, std::size_t end) {
+static void parallel_scale(
+    std::vector<double>& vector,
+    double factor,
+    ThreadPool& pool,
+    std::size_t worker_count)
+{
+    parallel_for_workers(
+        pool,
+        vector.size(),
+        worker_count,
+        [&vector, factor](std::size_t begin, std::size_t end) {
             for (std::size_t i = begin; i < end; ++i) {
                 vector[i] *= factor;
             }
         });
 }
 
-static void normalize(std::vector<double>& vector, ThreadPool& pool, std::size_t chunk_size) {
-    const double norm = std::sqrt(dot(vector, vector, pool, chunk_size));
-    if (!(norm > 0.0) || !std::isfinite(norm)) {
-        throw std::runtime_error("cannot normalize vector: invalid L2 norm");
-    }
+static void normalize(
+    std::vector<double>& vector,
+    ThreadPool& pool,
+    std::size_t worker_count)
+{
+    const double norm =
+        std::sqrt(dot(vector, vector, pool, worker_count));
 
-    parallel_scale(vector, 1.0 / norm, pool, chunk_size);
+    parallel_scale(
+        vector,
+        1.0 / norm,
+        pool,
+        worker_count);
 }
 
-static void spmv_csr_shifted_rows(const CSRMatrix& matrix,
-                                       std::size_t row_shift,
-                                       const std::vector<double>& x,
-                                       std::vector<double>& y,
-                                       ThreadPool& pool,
-                                       std::size_t chunk_size) {
+static void spmv_csr_shifted_rows(
+    const CSRMatrix& matrix,
+    std::size_t row_shift,
+    const std::vector<double>& x,
+    std::vector<double>& y,
+    ThreadPool& pool,
+    std::size_t worker_count,
+    std::size_t chunk_size)
+{
     if (x.size() != matrix.n) {
         throw std::runtime_error("SpMV input vector has invalid size");
     }
 
-    // Preserve the behavior of the sequential reference implementation.
-    y.assign(matrix.n, 0.0);
+    if (y.size() != matrix.n) {
+        y.resize(matrix.n);
+    }
 
-    parallel_for_chunks(pool, matrix.n, chunk_size, [&matrix, row_shift, &x, &y](std::size_t begin, std::size_t end) {
-            const std::size_t n = matrix.n;
+    const std::size_t number_of_chunks =
+        (matrix.n + chunk_size - 1) / chunk_size;
 
-            for (std::size_t logical_row = begin; logical_row < end; ++logical_row) {
-                const std::size_t source_row =
-                    (logical_row + n - row_shift) % n;
+    std::atomic<std::size_t> next_chunk{0};
+    std::vector<std::future<void>> completions;
+    completions.reserve(worker_count);
 
-                double sum = 0.0;
-                for (std::uint64_t position = matrix.row_ptr[source_row]; position < matrix.row_ptr[source_row + 1]; ++position) {
-                    sum += matrix.values[position] * x[matrix.col_idx[position]];
+    for (std::size_t worker = 0; worker < worker_count; ++worker) {
+        completions.emplace_back(pool.submit(
+            [&matrix, row_shift, &x, &y,
+             &next_chunk, number_of_chunks, chunk_size] {
+                
+                while (true) {
+                    const std::size_t chunk =
+                        next_chunk.fetch_add(1, std::memory_order_relaxed);
+
+                    if (chunk >= number_of_chunks) {
+                        break;
+                    }
+
+                    const std::size_t begin = chunk * chunk_size;
+                    const std::size_t end =
+                        std::min(begin + chunk_size, matrix.n);
+
+                    for (std::size_t logical_row = begin;
+                         logical_row < end;
+                         ++logical_row) {
+
+                        const std::size_t source_row =
+                            (logical_row + matrix.n - row_shift) % matrix.n;
+
+                        double sum = 0.0;
+
+                        for (std::uint64_t position =
+                                 matrix.row_ptr[source_row];
+                             position < matrix.row_ptr[source_row + 1];
+                             ++position) {
+                            
+                            sum += matrix.values[position] *
+                                   x[matrix.col_idx[position]];
+                        }
+
+                        y[logical_row] = sum;
+                    }
                 }
+            }));
+    }
 
-                y[logical_row] = sum;
-            }
-        });
+    for (auto& completion : completions) {
+        completion.get();
+    }
 }
 
 struct IterativeResult {
