@@ -49,7 +49,6 @@
 //   - The computation uses a fixed number of iterations.
 //   - The main workload is the irregular case.
 
-
 #include <algorithm>
 #include <chrono>
 #include <cmath>
