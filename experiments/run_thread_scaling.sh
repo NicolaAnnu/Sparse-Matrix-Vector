@@ -31,7 +31,7 @@ seq_med=$(awk -F, \
     }' "$BASELINE_FILE")
 
 if [[ -z "$seq_med" ]]; then
-    echo "Errore: nel CSV della baseline non esiste una configurazione compatibile."
+    echo "Error"
     exit 1
 fi
 
