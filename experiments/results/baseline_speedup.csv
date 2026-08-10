@@ -1,0 +1,3 @@
+n,nz,mode,seed,threads,block_size,seq_time_med,thread_time_med,speedup,efficiency_percent
+1000000,200000000,irregular,111,16,1024,425.759133,42.999648,9.901456,61.8841
+1000000,200000000,irregular,111,32,1024,425.759133,38.842832,10.961073,34.2534
