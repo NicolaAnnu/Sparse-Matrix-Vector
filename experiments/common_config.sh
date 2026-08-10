@@ -1,8 +1,8 @@
 #!/bin/bash
 
 # Executables
-CPP_THREADS_BIN="./thread_SpMV"
-SEQ_BIN="./seq"
+CPP_THREADS_BIN="../thread_SpMV"
+SEQ_BIN="../seq"
 
 # Default experiment parameters
 DEFAULT_N=1000000
