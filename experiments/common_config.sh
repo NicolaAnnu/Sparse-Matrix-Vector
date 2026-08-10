@@ -54,21 +54,16 @@ run_cpp_threads() {
     shift
 
     if (( threads <= PHYSICAL_CORES )); then
-        srun --partition="$PARTITION" \
-             --nodes=1 \
-             --ntasks=1 \
-             --cpus-per-task="$threads" \
-             --hint=nomultithread \
-             --cpu-bind=cores \
-             --time="$TIME_LIMIT" \
-             "$CPP_THREADS_BIN" "$@" -t "$threads"
+        srun --partition="$PARTITION" --nodes=1 --ntasks=1 \
+          --cpus-per-task="$threads" \
+          --hint=nomultithread \
+          --time="$TIME_LIMIT" \
+          "$CPP_THREADS_BIN" "$@" -t "$threads"
     else
-        srun --partition="$PARTITION" \
-             --nodes=1 \
-             --ntasks=1 \
-             --cpus-per-task="$threads" \
-             --cpu-bind=threads \
-             --time="$TIME_LIMIT" \
-             "$CPP_THREADS_BIN" "$@" -t "$threads"
+        srun --partition="$PARTITION" --nodes=1 --ntasks=1 \
+          --cpus-per-task="$threads" \
+          --cpu-bind=threads \
+          --time="$TIME_LIMIT" \
+          "$CPP_THREADS_BIN" "$@" -t "$threads"
     fi
 }
