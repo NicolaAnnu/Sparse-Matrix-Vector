@@ -316,21 +316,6 @@ int main(int argc, char** argv) {
     (void)read_arg_u64(argc, argv, "-b", block_size64);
     (void)read_arg_str(argc, argv, "--dump-vector", dump_vector_path);
 
-    if (num_threads == 0) {
-        std::cerr << "[ERROR] number of threads must be > 0\n";
-        return 1;
-    }
-
-    if (n64 == 0) {
-        std::cerr << "[ERROR] matrix size n must be > 0\n";
-        return 1;
-    }
-
-    if (block_size64 == 0 || block_size64 > n64) {
-        std::cerr << "[ERROR] block size B must satisfy 0 < B <= n\n";
-        return 1;
-    }
-
     const std::size_t n = static_cast<std::size_t>(n64);
     const std::size_t worker_count = static_cast<std::size_t>(num_threads);
     const std::size_t chunk_size = static_cast<std::size_t>(block_size64);
