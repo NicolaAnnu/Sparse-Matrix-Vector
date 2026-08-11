@@ -9,13 +9,13 @@ SEED=$DEFAULT_SEED
 BLOCK_SIZE=$DEFAULT_BLOCK_SIZE
 THREAD_COUNTS=(1 2 4 8 16 32)
 
-BASELINE_FILE="$RESULTS_DIR/baseline_speedup.csv"
-OUT="$RESULTS_DIR/thread_scaling.csv"
+BASELINE_FILE="$RESULTS_DIR/THREAD_baseline_speedup.csv"
+OUT="$RESULTS_DIR/THREAD_scaling.csv"
 
 # Controlla che la baseline sia già stata calcolata
 if [[ ! -f "$BASELINE_FILE" ]]; then
     echo "Errore: manca $BASELINE_FILE"
-    echo "Esegui prima ./run_baseline_speedup.sh"
+    echo "Esegui prima ./THREAD_run_baseline_speedup.sh"
     exit 1
 fi
 

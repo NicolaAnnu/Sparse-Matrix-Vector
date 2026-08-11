@@ -9,7 +9,7 @@ SEED=$DEFAULT_SEED
 BLOCK_SIZE=$DEFAULT_BLOCK_SIZE
 THREAD_COUNTS=(16 32)
 
-OUT="$RESULTS_DIR/baseline_speedup.csv"
+OUT="$RESULTS_DIR/THREAD_baseline_speedup.csv"
 echo "n,nz,mode,seed,threads,block_size,seq_time_med,thread_time_med,speedup,efficiency_percent" > "$OUT"
 
 seq_times=()

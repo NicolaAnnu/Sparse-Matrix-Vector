@@ -10,13 +10,13 @@ BLOCK_SIZE=$DEFAULT_BLOCK_SIZE
 MODES=("regular" "irregular")
 THREAD_COUNTS=(16 32)
 
-BASELINE_FILE="$RESULTS_DIR/baseline_speedup.csv"
-OUT="$RESULTS_DIR/regular_vs_irregular.csv"
+BASELINE_FILE="$RESULTS_DIR/THREAD_baseline_speedup.csv"
+OUT="$RESULTS_DIR/THREAD_regular_vs_irregular.csv"
 
 # Serve per recuperare la baseline irregular
 if [[ ! -f "$BASELINE_FILE" ]]; then
     echo "Errore: manca $BASELINE_FILE"
-    echo "Esegui prima ./run_baseline_speedup.sh"
+    echo "Esegui prima ./THREAD_run_baseline_speedup.sh"
     exit 1
 fi
 

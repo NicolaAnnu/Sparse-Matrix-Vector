@@ -10,7 +10,7 @@ SEED=$DEFAULT_SEED
 THREAD_COUNTS=(16 32)
 BLOCK_SIZES=(256 512 1024 2048 4096 8192)
 
-OUT="$RESULTS_DIR/task_granularity.csv"
+OUT="$RESULTS_DIR/THREAD_task_granularity.csv"
 echo "n,nz,mode,seed,threads,block_size,num_chunks,time_med" > "$OUT"
 
 for threads in "${THREAD_COUNTS[@]}"; do
