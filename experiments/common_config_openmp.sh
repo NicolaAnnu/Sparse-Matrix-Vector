@@ -12,7 +12,7 @@ DEFAULT_NZ=200000000
 DEFAULT_MODE="irregular"
 DEFAULT_SEED=111
 DEFAULT_THREADS=32
-DEFAULT_BLOCK_SIZE=1024
+DEFAULT_BLOCK_SIZE=512
 REPEATS=3
 
 PARTITION="normal"
@@ -46,7 +46,6 @@ run_seq() {
       --ntasks=1 \
       --cpus-per-task=1 \
       --hint=nomultithread \
-      --cpu-bind=cores \
       --time="$TIME_LIMIT" \
       "$SEQ_BIN" "$@"
 }
