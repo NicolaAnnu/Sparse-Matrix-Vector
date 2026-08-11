@@ -2,7 +2,7 @@
 
 # Executables
 
-OPENMP_BIN="../openmp_spmv"
+OPENMP_BIN="../openmp_SpMV"
 SEQ_BIN="../seq"
 
 # Default experiment parameters
