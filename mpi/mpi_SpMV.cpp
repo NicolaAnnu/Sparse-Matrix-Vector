@@ -1,16 +1,16 @@
 // Hybrid MPI + OpenMP implementation of the Iterative Sparse Matrix-Vector Computation
 //
 // Command line:
-//   mpirun -np P ./mpi_omp -n N -nz K -m mode -t T --chunk-size C
+//   mpirun -np P ./mpi -n N -nz K -m mode -t T -b B
 //
 // Minimal build:
-//   mpic++ -O3 -std=c++20 -I . -Wall mpi_omp_SpMV.cpp -o mpi_omp -fopenmp
+//   mpic++ -O3 -std=c++17 -fopenmp -I. -Wall -Wextra -Wpedantic mpi_SpMV.cpp -o mpi
 //
 // Examples:
 //   salloc -N 2
-//   mpirun -n 2 ./mpi_omp -n 500000 -nz 20000000 -m regular -t 4 --chunk-size 1024
-//   mpirun -n 4 ./mpi_omp -n 500000 -nz 20000000 -m irregular -t 2 --chunk-size 256
-//   mpirun -n 4 ./mpi_omp -n 5000 -nz 20000 -m irregular -t 2 --chunk-size 256 --dump-vector omp_vec.dump
+//   mpirun -n 2 ./mpi -n 500000 -nz 20000000 -m regular -t 4 -b 1024
+//   mpirun -n 4 ./mpi -n 500000 -nz 20000000 -m irregular -t 2 -b 256
+//   mpirun -n 4 ./mpi -n 5000 -nz 20000 -m irregular -t 2 -b 256 --dump-vector mpi_vec.dump
 //
 // Notes:
 //   - Matrix generation is not included in computation time.
