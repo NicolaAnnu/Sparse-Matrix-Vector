@@ -40,13 +40,12 @@ calculate_median() {
 
 run_seq() {
     srun --partition="$PARTITION" \
-         --nodes=1 \
-         --ntasks=1 \
-         --cpus-per-task=1 \
-         --hint=nomultithread \
-         --cpu-bind=cores \
-         --time="$TIME_LIMIT" \
-         "$SEQ_BIN" "$@"
+      --nodes=1 \
+      --ntasks=1 \
+      --cpus-per-task=1 \
+      --hint=nomultithread \
+      --time="$TIME_LIMIT" \
+      "$SEQ_BIN" "$@"
 }
 
 run_cpp_threads() {
