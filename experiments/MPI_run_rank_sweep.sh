@@ -9,8 +9,8 @@ SEED=$DEFAULT_SEED
 BLOCK_SIZE=$DEFAULT_MPI_BLOCK_SIZE
 
 MODES=("regular" "irregular")
-MPI_PROCESSES=(1 2 4 6 8)
-THREAD_COUNTS=(16 32)
+MPI_PROCESSES=(1 2 4)
+THREAD_COUNTS=(2 4)
 
 RAW_OUT="$RESULTS_DIR/MPI_rank_thread_sweep_raw.csv"
 OUT="$RESULTS_DIR/MPI_rank_thread_sweep.csv"
