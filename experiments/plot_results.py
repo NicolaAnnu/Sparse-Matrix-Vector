@@ -41,6 +41,8 @@ TW = read("OPENMP_task_vs_worksharing.csv")
 MG = read("MPI_task_granularity.csv")
 MS = read("MPI_strong_scaling.csv").sort_values("nodes")
 MW = read("MPI_weak_scaling.csv").sort_values("nodes")
+MRT_RAW = read("MPI_rank_thread_sweep_raw.csv")
+MRT = read("MPI_rank_thread_sweep.csv")
 
 # C++ Threads / OpenMP
 b = sorted(TG.block_size.unique())
@@ -135,6 +137,74 @@ breakdown(
     "12_mpi_weak_breakdown",
     "MPI+OpenMP phase breakdown - weak scaling - irregular workload",
     MW
+)
+# MPI rank/thread sweep
+def mpi_rank_thread_sweep(name, mode, raw):
+
+    df = raw[raw["mode"] == mode].copy()
+
+    plt.figure(figsize=(7, 4.5))
+
+    for ranks in sorted(df["mpi_processes"].unique()):
+
+        d = df[df["mpi_processes"] == ranks]
+
+        stats = (
+            d.groupby("threads_per_process")["time"]
+             .agg(["mean", "min", "max"])
+             .reset_index()
+             .sort_values("threads_per_process")
+        )
+
+        plt.errorbar(
+            stats["threads_per_process"],
+            stats["mean"],
+            yerr=[
+                stats["mean"] - stats["min"],
+                stats["max"] - stats["mean"]
+            ],
+            marker="o",
+            capsize=4,
+            linewidth=2,
+            label=f"{ranks} MPI rank" if ranks == 1 else f"{ranks} MPI ranks"
+        )
+
+    n = int(df["n"].iloc[0])
+    nz = int(df["nz"].iloc[0])
+
+    threads = sorted(df["threads_per_process"].unique())
+
+    plt.title(
+        f"MPI+OpenMP rank/thread interaction - {mode} workload\n"
+        f"N = {n:,}, nnz = {nz:,}"
+    )
+
+    plt.xlabel("OpenMP threads per rank")
+    plt.ylabel("Execution time [s]")
+
+    plt.xticks(threads)
+    plt.grid(alpha=.3)
+    plt.legend()
+    plt.tight_layout()
+
+    plt.savefig(
+        P / f"{name}.png",
+        dpi=220,
+        bbox_inches="tight"
+    )
+
+    plt.close()
+
+mpi_rank_thread_sweep(
+    "13_mpi_rank_thread_sweep_regular",
+    "regular",
+    MRT_RAW
+)
+
+mpi_rank_thread_sweep(
+    "14_mpi_rank_thread_sweep_irregular",
+    "irregular",
+    MRT_RAW
 )
 
 print(f"Plots saved in: {P}")
