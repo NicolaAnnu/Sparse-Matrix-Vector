@@ -3,6 +3,7 @@
 # Executables
 
 OPENMP_BIN="../openmp_SpMV"
+OPENMP_WORKSHARING_BIN="../openmp_SpMV_worksharing"
 SEQ_BIN="../seq"
 
 DEFAULT_N=1000000
@@ -70,5 +71,30 @@ run_openmp() {
               OMP_PLACES=threads \
               OMP_PROC_BIND=close \
           "$OPENMP_BIN" "$@" -t "$threads"
+    fi
+}
+
+run_openmp_worksharing() {
+    local threads="$1"
+    shift
+
+    if (( threads <= PHYSICAL_CORES )); then
+        srun --partition="$PARTITION" --nodes=1 --ntasks=1 \
+          --cpus-per-task="$threads" \
+          --hint=nomultithread \
+          --time="$TIME_LIMIT" \
+          env OMP_NUM_THREADS="$threads" \
+              OMP_PLACES=cores \
+              OMP_PROC_BIND=close \
+          "$OPENMP_WORKSHARING_BIN" "$@" -t "$threads"
+    else
+        srun --partition="$PARTITION" --nodes=1 --ntasks=1 \
+          --cpus-per-task="$threads" \
+          --cpu-bind=threads \
+          --time="$TIME_LIMIT" \
+          env OMP_NUM_THREADS="$threads" \
+              OMP_PLACES=threads \
+              OMP_PROC_BIND=close \
+          "$OPENMP_WORKSHARING_BIN" "$@" -t "$threads"
     fi
 }

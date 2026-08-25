@@ -208,7 +208,9 @@ static IterativeResult iterative_spmv_evolving(
 
     // Persistent OpenMP team: created once and reused for normalization,
     // every SpMV iteration, and the final diagnostics.
-    #pragma omp parallel num_threads(worker_count) shared(x, y, row_shift, rayleigh, norm, checksum, partial)
+    #pragma omp parallel num_threads(worker_count) default(none) \
+        shared(A, x, y, row_shift, rayleigh, norm, checksum, partial, \
+               shift_rows, n, chunk_size)
     {
         // The initialized vector must be normalized before iteration 0.
         normalize(
@@ -219,13 +221,15 @@ static IterativeResult iterative_spmv_evolving(
         // PHASE 2: iterative computation on the evolving matrix.
         for (std::uint32_t iter = 0; iter < NUM_ITERS; ++iter) {
 
-            #pragma omp single
-            {
-                if (iter > 0 && (iter % EPOCH_LEN) == 0) {
+            // The row shift changes only at epoch boundaries.
+            if (iter > 0 && (iter % EPOCH_LEN) == 0) {
+                #pragma omp single
+                {
                     row_shift = (row_shift + shift_rows) % n;
                 }
             }
 
+            // All threads cooperate on the SpMV through dynamic work-sharing.
             spmv_csr_shifted_rows(
                 A,
                 row_shift,
@@ -233,11 +237,13 @@ static IterativeResult iterative_spmv_evolving(
                 y,
                 chunk_size);
 
+            // All threads cooperate on normalization.
             normalize(
                 y,
                 partial,
                 norm);
 
+            // Only one thread swaps the shared vectors.
             #pragma omp single
             {
                 x.swap(y);
@@ -258,6 +264,7 @@ static IterativeResult iterative_spmv_evolving(
             partial,
             rayleigh);
 
+        // Preserve the checksum implementation used by the task-based code.
         // It is executed by one thread.
         #pragma omp single
         {
