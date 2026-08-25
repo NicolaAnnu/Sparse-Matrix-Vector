@@ -206,5 +206,40 @@ mpi_rank_thread_sweep(
     "irregular",
     MRT_RAW
 )
+# MPI regular vs irregular comparison
+curves = []
+
+for threads in sorted(MRT["threads_per_process"].unique()):
+
+    for mode, style in [
+        ("regular", "-"),
+        ("irregular", "--")
+    ]:
+
+        d = (
+            MRT[
+                (MRT["threads_per_process"] == threads) &
+                (MRT["mode"] == mode)
+            ]
+            .sort_values("mpi_processes")
+        )
+
+        curves.append(
+            (
+                d["mpi_processes"],
+                d["time_med"],
+                f"{mode.capitalize()}, {threads} threads/rank",
+                style
+            )
+        )
+
+draw(
+    "15_mpi_regular_vs_irregular",
+    "MPI+OpenMP: regular vs irregular workload",
+    "MPI processes",
+    "Time [s]",
+    curves,
+    sorted(MRT["mpi_processes"].unique())
+)
 
 print(f"Plots saved in: {P}")
