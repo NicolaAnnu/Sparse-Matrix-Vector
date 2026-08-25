@@ -17,11 +17,6 @@ BASELINE_FILE="$RESULTS_DIR/THREAD_baseline_speedup.csv"
 
 OUT="$RESULTS_DIR/MPI_strong_scaling.csv"
 
-if [[ ! -f "$BASELINE_FILE" ]]; then
-    echo "Error: missing $BASELINE_FILE"
-    exit 1
-fi
-
 seq_med=$(awk -F, \
     -v n="$N" \
     -v nz="$NZ" \
@@ -35,11 +30,6 @@ seq_med=$(awk -F, \
         print $7
         exit
     }' "$BASELINE_FILE")
-
-if [[ -z "$seq_med" ]]; then
-    echo "Error: sequential baseline not found"
-    exit 1
-fi
 
 echo "Sequential baseline: $seq_med s"
 

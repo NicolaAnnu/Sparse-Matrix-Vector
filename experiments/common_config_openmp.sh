@@ -5,8 +5,6 @@
 OPENMP_BIN="../openmp_SpMV"
 SEQ_BIN="../seq"
 
-# Default experiment parameters
-
 DEFAULT_N=1000000
 DEFAULT_NZ=200000000
 DEFAULT_MODE="irregular"

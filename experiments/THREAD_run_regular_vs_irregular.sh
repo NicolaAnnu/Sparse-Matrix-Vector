@@ -13,18 +13,10 @@ THREAD_COUNTS=(16 32)
 BASELINE_FILE="$RESULTS_DIR/THREAD_baseline_speedup.csv"
 OUT="$RESULTS_DIR/THREAD_regular_vs_irregular.csv"
 
-# Serve per recuperare la baseline irregular
-if [[ ! -f "$BASELINE_FILE" ]]; then
-    echo "Errore: manca $BASELINE_FILE"
-    echo "Esegui prima ./THREAD_run_baseline_speedup.sh"
-    exit 1
-fi
-
 echo "n,nz,mode,seed,threads,block_size,seq_time_med,thread_time_med,speedup,efficiency_percent" > "$OUT"
 
 for mode in "${MODES[@]}"; do
 
-    # REGULAR: calcola qui la baseline sequenziale
     if [[ "$mode" == "regular" ]]; then
 
         echo "Calculating sequential baseline for regular matrix"
@@ -49,7 +41,6 @@ for mode in "${MODES[@]}"; do
 
         echo "Sequential regular median: $seq_med s"
 
-    # IRREGULAR: recupera la baseline già calcolata
     else
 
         seq_med=$(awk -F, \
@@ -61,12 +52,7 @@ for mode in "${MODES[@]}"; do
                 print $7
                 exit
             }' "$BASELINE_FILE")
-
-        if [[ -z "$seq_med" ]]; then
-            echo "Errore: baseline irregular non trovata in $BASELINE_FILE"
-            exit 1
-        fi
-
+            
         echo "Sequential irregular median recuperata: $seq_med s"
     fi
 

@@ -12,14 +12,6 @@ THREAD_COUNTS=(1 2 4 8 16 32)
 BASELINE_FILE="$RESULTS_DIR/THREAD_baseline_speedup.csv"
 OUT="$RESULTS_DIR/THREAD_scaling.csv"
 
-# Controlla che la baseline sia già stata calcolata
-if [[ ! -f "$BASELINE_FILE" ]]; then
-    echo "Errore: manca $BASELINE_FILE"
-    echo "Esegui prima ./THREAD_run_baseline_speedup.sh"
-    exit 1
-fi
-
-# Recupera il tempo sequenziale con gli stessi N, NZ, mode e seed
 seq_med=$(awk -F, \
     -v n="$N" \
     -v nz="$NZ" \
@@ -35,7 +27,7 @@ if [[ -z "$seq_med" ]]; then
     exit 1
 fi
 
-echo "Sequential median recuperata: $seq_med s"
+echo "Sequential median: $seq_med s"
 
 echo "n,nz,mode,seed,block_size,threads,seq_time_med,thread_time_med,speedup,efficiency_percent" > "$OUT"
 
