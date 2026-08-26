@@ -16,7 +16,7 @@ NODE_COUNTS=(1 2 4 6 8)
 
 OUT="$RESULTS_DIR/MPI_weak_scaling.csv"
 
-echo "nodes,mpi_processes,threads_per_process,n,nz,mode,seed,block_size,time_med,weak_efficiency,distribution_med,local_computation_med,spmv_med,normalize_med,rotate_med,communication_med,reduction_med,epoch_med" > "$OUT"
+echo "nodes,mpi_processes,threads_per_process,n,nz,mode,seed,block_size,time_med,weak_efficiency,distribution_med,spmv_med,normalize_med,rotate_med,communication_med,reduction_med,epoch_med" > "$OUT"
 
 reference_time=""
 
@@ -78,7 +78,7 @@ for nodes in "${NODE_COUNTS[@]}"; do
         -v current="$time_med" \
         'BEGIN {printf "%.6f", ref/current}')
 
-    echo "$nodes,$nodes,$THREADS,$N,$NZ,$MODE,$SEED,$BLOCK_SIZE,$time_med,$weak_efficiency,$distribution_med,$computation_med,$spmv_med,$normalize_med,$rotate_med,$communication_med,$reduction_med,$epoch_med" >> "$OUT"
+    echo "$nodes,$nodes,$THREADS,$N,$NZ,$MODE,$SEED,$BLOCK_SIZE,$time_med,$weak_efficiency,$distribution_med,$spmv_med,$normalize_med,$rotate_med,$communication_med,$reduction_med,$epoch_med" >> "$OUT"
 
     echo "MPI median: $time_med s"
     echo "Weak efficiency: $weak_efficiency"

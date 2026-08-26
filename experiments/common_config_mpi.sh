@@ -140,7 +140,6 @@ srun --partition="$PARTITION" \
   --ntasks-per-node="$ranks" \
   --cpus-per-task="$threads" \
   --hint=nomultithread \
-  --cpu-bind=cores \
   --mpi=pmix \
   --time="$TIME_LIMIT" \
   env OMP_NUM_THREADS="$threads" \
