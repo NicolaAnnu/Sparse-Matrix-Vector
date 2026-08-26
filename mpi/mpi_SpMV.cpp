@@ -187,6 +187,9 @@ struct IterativeResult {
     std::size_t final_row_shift = 0;
     double distribution_time = 0.0;
     double local_computation_time = 0.0;
+    double spmv_time = 0.0;
+    double normalize_time = 0.0;
+    double rotate_time = 0.0;
     double communication_time = 0.0;
     double reduction_time = 0.0;
     double epoch_time = 0.0;
@@ -284,6 +287,9 @@ static IterativeResult distributed_iterative_spmv(
     double rayleigh = 0.0;
     std::uint64_t checksum = 0;
     double local_computation_time = 0.0;
+    double spmv_time = 0.0;
+    double normalize_time = 0.0;
+    double rotate_time = 0.0;
     double communication_time = 0.0;
     double reduction_time = 0.0;
     double epoch_time = 0.0;
@@ -297,6 +303,7 @@ static IterativeResult distributed_iterative_spmv(
             normalize(x, worker_count);
             auto t1 = std::chrono::steady_clock::now();
             local_computation_time += std::chrono::duration<double>(t1 - t0).count();
+            normalize_time += std::chrono::duration<double>(t1 - t0).count();
 
             for (std::uint32_t iter = 0; iter < NUM_ITERS; ++iter) {
                 if (iter > 0 && (iter % EPOCH_LEN) == 0) {
@@ -317,6 +324,7 @@ static IterativeResult distributed_iterative_spmv(
                     chunk_size);
                 t1 = std::chrono::steady_clock::now();
                 local_computation_time += std::chrono::duration<double>(t1 - t0).count();
+                spmv_time += std::chrono::duration<double>(t1 - t0).count();
 
                 double global_norm2 = 0.0;
                 t0 = std::chrono::steady_clock::now();
@@ -329,6 +337,7 @@ static IterativeResult distributed_iterative_spmv(
                 parallel_scale(local_out, 1.0 / std::sqrt(global_norm2), worker_count);
                 t1 = std::chrono::steady_clock::now();
                 local_computation_time += std::chrono::duration<double>(t1 - t0).count();
+                normalize_time += std::chrono::duration<double>(t1 - t0).count();
 
                 t0 = std::chrono::steady_clock::now();
                 MPI_Allgatherv(local_out.data(), local_n, MPI_DOUBLE,
@@ -342,6 +351,7 @@ static IterativeResult distributed_iterative_spmv(
                 x.swap(y);
                 t1 = std::chrono::steady_clock::now();
                 local_computation_time += std::chrono::duration<double>(t1 - t0).count();
+                rotate_time += std::chrono::duration<double>(t1 - t0).count();
             }
 
             // Phase 3: final diagnostics, as in the OpenMP version.
@@ -358,12 +368,18 @@ static IterativeResult distributed_iterative_spmv(
 
     double global_distribution = 0.0;
     double global_local_computation = 0.0;
+    double global_spmv = 0.0;
+    double global_normalize = 0.0;
+    double global_rotate = 0.0;
     double global_communication = 0.0;
     double global_reduction = 0.0;
     double global_epoch = 0.0;
 
     MPI_Reduce(&distribution_time, &global_distribution, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
     MPI_Reduce(&local_computation_time, &global_local_computation, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
+    MPI_Reduce(&spmv_time, &global_spmv, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
+    MPI_Reduce(&normalize_time, &global_normalize, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
+    MPI_Reduce(&rotate_time, &global_rotate, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
     MPI_Reduce(&communication_time, &global_communication, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
     MPI_Reduce(&reduction_time, &global_reduction, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
     MPI_Reduce(&epoch_time, &global_epoch, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
@@ -377,6 +393,9 @@ static IterativeResult distributed_iterative_spmv(
         row_shift,
         global_distribution,
         global_local_computation,
+        global_spmv,
+        global_normalize,
+        global_rotate,
         global_communication,
         global_reduction,
         global_epoch
@@ -471,6 +490,9 @@ int main(int argc, char** argv) {
             std::cout << "Time (sec) = " << computation_sec << "\n";
             std::cout << "distribution_time=" << result.distribution_time << "\n";
             std::cout << "local_computation_time=" << result.local_computation_time << "\n";
+            std::cout << "spmv_time=" << result.spmv_time << "\n";
+            std::cout << "normalize_time=" << result.normalize_time << "\n";
+            std::cout << "rotate_time=" << result.rotate_time << "\n";
             std::cout << "communication_time=" << result.communication_time << "\n";
             std::cout << "global_reduction_time=" << result.reduction_time << "\n";
             std::cout << "epoch_transition_time=" << result.epoch_time << "\n";
