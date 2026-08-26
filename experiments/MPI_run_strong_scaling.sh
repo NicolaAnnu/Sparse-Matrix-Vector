@@ -33,7 +33,7 @@ seq_med=$(awk -F, \
 
 echo "Sequential baseline: $seq_med s"
 
-echo "n,nz,mode,seed,nodes,mpi_processes,threads_per_process,block_size,seq_time_med,mpi_time_med,absolute_speedup,relative_speedup,relative_efficiency_percent,distribution_med,local_computation_med,communication_med,reduction_med,epoch_med" > "$OUT"
+echo "n,nz,mode,seed,nodes,mpi_processes,threads_per_process,block_size,seq_time_med,mpi_time_med,absolute_speedup,relative_speedup,relative_efficiency_percent,distribution_med,spmv_med,normalize_med,rotate_med,communication_med,reduction_med,epoch_med" > "$OUT"
 
 mpi_one_node=""
 
@@ -44,7 +44,9 @@ for nodes in "${NODE_COUNTS[@]}"; do
 
     times=()
     distributions=()
-    computations=()
+    spmvs=()
+    normalizations=()
+    rotations=()
     communications=()
     reductions=()
     epochs=()
@@ -64,7 +66,9 @@ for nodes in "${NODE_COUNTS[@]}"; do
 
         times+=("$(echo "$output" | extract_time)")
         distributions+=("$(echo "$output" | extract_distribution_time)")
-        computations+=("$(echo "$output" | extract_local_computation_time)")
+        spmvs+=("$(echo "$output" | extract_spmv_time)")
+        normalizations+=("$(echo "$output" | extract_normalize_time)")
+        rotations+=("$(echo "$output" | extract_rotate_time)")
         communications+=("$(echo "$output" | extract_communication_time)")
         reductions+=("$(echo "$output" | extract_reduction_time)")
         epochs+=("$(echo "$output" | extract_epoch_time)")
@@ -72,7 +76,9 @@ for nodes in "${NODE_COUNTS[@]}"; do
 
     time_med=$(calculate_median "${times[@]}")
     distribution_med=$(calculate_median "${distributions[@]}")
-    computation_med=$(calculate_median "${computations[@]}")
+    spmv_med=$(calculate_median "${spmvs[@]}")
+    normalize_med=$(calculate_median "${normalizations[@]}")
+    rotate_med=$(calculate_median "${rotations[@]}")
     communication_med=$(calculate_median "${communications[@]}")
     reduction_med=$(calculate_median "${reductions[@]}")
     epoch_med=$(calculate_median "${epochs[@]}")
@@ -96,7 +102,7 @@ for nodes in "${NODE_COUNTS[@]}"; do
         -v n="$nodes" \
         'BEGIN {printf "%.4f", 100*s/n}')
 
-    echo "$N,$NZ,$MODE,$SEED,$nodes,$nodes,$THREADS,$BLOCK_SIZE,$seq_med,$time_med,$absolute_speedup,$relative_speedup,$relative_efficiency,$distribution_med,$computation_med,$communication_med,$reduction_med,$epoch_med" >> "$OUT"
+    echo "$N,$NZ,$MODE,$SEED,$nodes,$nodes,$THREADS,$BLOCK_SIZE,$seq_med,$time_med,$absolute_speedup,$relative_speedup,$relative_efficiency,$distribution_med,$spmv_med,$normalize_med,$rotate_med,$communication_med,$reduction_med,$epoch_med" >> "$OUT"
 
     echo "MPI median: $time_med s"
     echo "Absolute speedup: $absolute_speedup"

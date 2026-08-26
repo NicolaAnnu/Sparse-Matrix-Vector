@@ -41,8 +41,16 @@ extract_distribution_time() {
 awk -F'=' '/^distribution_time=/ {print $2; exit}'
 }
 
-extract_local_computation_time() {
-awk -F'=' '/^local_computation_time=/ {print $2; exit}'
+extract_spmv_time() {
+awk -F'=' '/^spmv_time=/ {print $2; exit}'
+}
+
+extract_normalize_time() {
+awk -F'=' '/^normalize_time=/ {print $2; exit}'
+}
+
+extract_rotate_time() {
+awk -F'=' '/^rotate_time=/ {print $2; exit}'
 }
 
 extract_communication_time() {
@@ -119,4 +127,25 @@ else
 
 fi
 
+}
+
+run_mpi_rank_thread() {
+local ranks="$1"
+local threads="$2"
+shift 2
+
+srun --partition="$PARTITION" \
+  --nodes=1 \
+  --ntasks="$ranks" \
+  --ntasks-per-node="$ranks" \
+  --cpus-per-task="$threads" \
+  --hint=nomultithread \
+  --cpu-bind=cores \
+  --mpi=pmix \
+  --time="$TIME_LIMIT" \
+  env OMP_NUM_THREADS="$threads" \
+      OMP_DYNAMIC=FALSE \
+      OMP_PLACES=cores \
+      OMP_PROC_BIND=close \
+  "$MPI_BIN" "$@" -t "$threads"
 }

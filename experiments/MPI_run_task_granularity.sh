@@ -15,7 +15,7 @@ BLOCK_SIZES=(256 512 1024 2048 4096)
 
 OUT="$RESULTS_DIR/MPI_task_granularity.csv"
 
-echo "n,nz,mode,seed,nodes,mpi_processes,threads_per_process,block_size,time_med,distribution_med,local_computation_med,communication_med,reduction_med,epoch_med" > "$OUT"
+echo "n,nz,mode,seed,nodes,mpi_processes,threads_per_process,block_size,time_med,distribution_med,spmv_med,normalize_med,rotate_med,communication_med,reduction_med,epoch_med" > "$OUT"
 
 for threads in "${THREAD_COUNTS[@]}"; do
 
@@ -26,7 +26,9 @@ for threads in "${THREAD_COUNTS[@]}"; do
 
         times=()
         distributions=()
-        computations=()
+        spmvs=()
+        normalizations=()
+        rotations=()
         communications=()
         reductions=()
         epochs=()
@@ -46,7 +48,9 @@ for threads in "${THREAD_COUNTS[@]}"; do
 
             times+=("$(echo "$output" | extract_time)")
             distributions+=("$(echo "$output" | extract_distribution_time)")
-            computations+=("$(echo "$output" | extract_local_computation_time)")
+            spmvs+=("$(echo "$output" | extract_spmv_time)")
+            normalizations+=("$(echo "$output" | extract_normalize_time)")
+            rotations+=("$(echo "$output" | extract_rotate_time)")
             communications+=("$(echo "$output" | extract_communication_time)")
             reductions+=("$(echo "$output" | extract_reduction_time)")
             epochs+=("$(echo "$output" | extract_epoch_time)")
@@ -54,12 +58,14 @@ for threads in "${THREAD_COUNTS[@]}"; do
 
         time_med=$(calculate_median "${times[@]}")
         distribution_med=$(calculate_median "${distributions[@]}")
-        computation_med=$(calculate_median "${computations[@]}")
+        spmv_med=$(calculate_median "${spmvs[@]}")
+        normalize_med=$(calculate_median "${normalizations[@]}")
+        rotate_med=$(calculate_median "${rotations[@]}")
         communication_med=$(calculate_median "${communications[@]}")
         reduction_med=$(calculate_median "${reductions[@]}")
         epoch_med=$(calculate_median "${epochs[@]}")
 
-        echo "$N,$NZ,$MODE,$SEED,$NODES,$NODES,$threads,$block_size,$time_med,$distribution_med,$computation_med,$communication_med,$reduction_med,$epoch_med" >> "$OUT"
+        echo "$N,$NZ,$MODE,$SEED,$NODES,$NODES,$threads,$block_size,$time_med,$distribution_med,$spmv_med,$normalize_med,$rotate_med,$communication_med,$reduction_med,$epoch_med" >> "$OUT"
 
         echo "Median = $time_med s"
 
