@@ -186,7 +186,6 @@ struct IterativeResult {
     std::uint64_t checksum = 0;
     std::size_t final_row_shift = 0;
     double distribution_time = 0.0;
-    double local_computation_time = 0.0;
     double spmv_time = 0.0;
     double normalize_time = 0.0;
     double rotate_time = 0.0;
@@ -286,7 +285,6 @@ static IterativeResult distributed_iterative_spmv(
     std::size_t row_shift = 0;
     double rayleigh = 0.0;
     std::uint64_t checksum = 0;
-    double local_computation_time = 0.0;
     double spmv_time = 0.0;
     double normalize_time = 0.0;
     double rotate_time = 0.0;
@@ -302,7 +300,6 @@ static IterativeResult distributed_iterative_spmv(
             auto t0 = std::chrono::steady_clock::now();
             normalize(x, worker_count);
             auto t1 = std::chrono::steady_clock::now();
-            local_computation_time += std::chrono::duration<double>(t1 - t0).count();
             normalize_time += std::chrono::duration<double>(t1 - t0).count();
 
             for (std::uint32_t iter = 0; iter < NUM_ITERS; ++iter) {
@@ -323,7 +320,6 @@ static IterativeResult distributed_iterative_spmv(
                     local_out,
                     chunk_size);
                 t1 = std::chrono::steady_clock::now();
-                local_computation_time += std::chrono::duration<double>(t1 - t0).count();
                 spmv_time += std::chrono::duration<double>(t1 - t0).count();
 
                 double global_norm2 = 0.0;
@@ -336,7 +332,6 @@ static IterativeResult distributed_iterative_spmv(
                 t0 = std::chrono::steady_clock::now();
                 parallel_scale(local_out, 1.0 / std::sqrt(global_norm2), worker_count);
                 t1 = std::chrono::steady_clock::now();
-                local_computation_time += std::chrono::duration<double>(t1 - t0).count();
                 normalize_time += std::chrono::duration<double>(t1 - t0).count();
 
                 t0 = std::chrono::steady_clock::now();
@@ -350,7 +345,6 @@ static IterativeResult distributed_iterative_spmv(
                 rotate_vector(global_out, y, row_shift, chunk_size);
                 x.swap(y);
                 t1 = std::chrono::steady_clock::now();
-                local_computation_time += std::chrono::duration<double>(t1 - t0).count();
                 rotate_time += std::chrono::duration<double>(t1 - t0).count();
             }
 
@@ -367,7 +361,6 @@ static IterativeResult distributed_iterative_spmv(
     }
 
     double global_distribution = 0.0;
-    double global_local_computation = 0.0;
     double global_spmv = 0.0;
     double global_normalize = 0.0;
     double global_rotate = 0.0;
@@ -376,7 +369,6 @@ static IterativeResult distributed_iterative_spmv(
     double global_epoch = 0.0;
 
     MPI_Reduce(&distribution_time, &global_distribution, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
-    MPI_Reduce(&local_computation_time, &global_local_computation, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
     MPI_Reduce(&spmv_time, &global_spmv, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
     MPI_Reduce(&normalize_time, &global_normalize, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
     MPI_Reduce(&rotate_time, &global_rotate, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
@@ -392,7 +384,6 @@ static IterativeResult distributed_iterative_spmv(
         checksum,
         row_shift,
         global_distribution,
-        global_local_computation,
         global_spmv,
         global_normalize,
         global_rotate,
@@ -489,7 +480,6 @@ int main(int argc, char** argv) {
             std::cout << std::fixed << std::setprecision(6);
             std::cout << "Time (sec) = " << computation_sec << "\n";
             std::cout << "distribution_time=" << result.distribution_time << "\n";
-            std::cout << "local_computation_time=" << result.local_computation_time << "\n";
             std::cout << "spmv_time=" << result.spmv_time << "\n";
             std::cout << "normalize_time=" << result.normalize_time << "\n";
             std::cout << "rotate_time=" << result.rotate_time << "\n";
