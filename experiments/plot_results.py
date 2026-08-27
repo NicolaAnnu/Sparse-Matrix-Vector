@@ -43,6 +43,7 @@ MS = read("MPI_strong_scaling.csv").sort_values("nodes")
 MW = read("MPI_weak_scaling.csv").sort_values("nodes")
 MRT_RAW = read("MPI_rank_thread_sweep_raw.csv")
 MRT = read("MPI_rank_thread_sweep.csv")
+MHB = read("MPI_hybrid_balance_sweep.csv")
 
 # C++ Threads / OpenMP
 b = sorted(TG.block_size.unique())
@@ -100,6 +101,80 @@ n = list(MW.nodes)
 draw("10_mpi_weak", "MPI+OpenMP weak scaling", "Nodes", "Time [s]",
      [(MW.nodes, MW.time_med, "Measured", "-")], n,
      ideal=(MW.nodes, [MW.time_med.iloc[0]] * len(MW), "Ideal constant time"))
+
+def mpi_hybrid_balance_breakdown(name, df):
+
+    d = df.copy()
+
+    labels = [
+        f"{int(row.mpi_processes)}r × {int(row.threads_per_process)}t"
+        for row in d.itertuples()
+    ]
+
+    x = range(len(d))
+    bottom = pd.Series(0.0, index=d.index)
+
+    plt.figure(figsize=(9, 5))
+
+    for col, label in [
+        ("spmv_med", "SpMV"),
+        ("normalize_med", "Normalize"),
+        ("rotate_med", "Rotate"),
+        ("communication_med", "Communication"),
+        ("reduction_med", "Reduction"),
+        ("epoch_med", "Epoch")
+    ]:
+
+        values = d[col].to_numpy()
+
+        bars = plt.bar(
+            x,
+            values,
+            bottom=bottom,
+            label=label
+        )
+
+        # Write values inside each colored block
+        plt.bar_label(
+            bars,
+            labels=[
+                f"{value:.2f}" if value >= 0.03 else ""
+                for value in values
+            ],
+            label_type="center",
+            fontsize=8
+        )
+
+        bottom = bottom + d[col]
+
+    n = int(d["n"].iloc[0])
+    nz = int(d["nz"].iloc[0])
+    nodes = int(d["nodes"].iloc[0])
+
+    plt.title(
+        f"MPI+OpenMP hybrid balance phase breakdown - {nodes} nodes\n"
+        f"N = {n:,}, nnz = {nz:,}"
+    )
+
+    plt.xlabel("MPI ranks × OpenMP threads per rank")
+    plt.ylabel("Time [s]")
+
+    plt.xticks(
+        list(x),
+        labels
+    )
+
+    plt.grid(axis="y", alpha=.3)
+    plt.legend()
+    plt.tight_layout()
+
+    plt.savefig(
+        P / f"{name}.png",
+        dpi=220,
+        bbox_inches="tight"
+    )
+
+    plt.close()
 
 def weak_scaling_breakdown(name, title, df):
 
@@ -357,6 +432,10 @@ draw(
     "Time [s]",
     curves,
     sorted(MRT["mpi_processes"].unique())
+)
+mpi_hybrid_balance_breakdown(
+    "16_mpi_hybrid_balance_breakdown",
+    MHB
 )
 
 print(f"Plots saved in: {P}")
