@@ -101,42 +101,159 @@ draw("10_mpi_weak", "MPI+OpenMP weak scaling", "Nodes", "Time [s]",
      [(MW.nodes, MW.time_med, "Measured", "-")], n,
      ideal=(MW.nodes, [MW.time_med.iloc[0]] * len(MW), "Ideal constant time"))
 
-def breakdown(name, title, df):
-    x = df["nodes"]
-    bottom = 0
-    plt.figure(figsize=(8, 4.8))
+def weak_scaling_breakdown(name, title, df):
+
+    d = df.sort_values("nodes").copy()
+
+    # Aggregate all local computation phases
+    d["computation_med"] = (
+        d["spmv_med"]
+        + d["normalize_med"]
+        + d["rotate_med"]
+    )
+
+    x = range(len(d))
+    bottom = [0.0] * len(d)
+
+    plt.figure(figsize=(9, 5))
+
+    components = [
+        ("computation_med", "Computation"),
+        ("communication_med", "Communication"),
+        ("reduction_med", "Reduction"),
+        ("epoch_med", "Epoch Transition"),
+        ("distribution_med", "Distribution")
+    ]
+
+    for col, label in components:
+
+        values = d[col].to_numpy()
+
+        bars = plt.bar(
+            x,
+            values,
+            bottom=bottom,
+            label=label
+        )
+
+        # Values written inside each section
+        plt.bar_label(
+            bars,
+            labels=[
+                f"{value:.2f}" if value >= 0.01 else ""
+                for value in values
+            ],
+            label_type="center",
+            fontsize=9,
+            fontweight="bold"
+        )
+
+        bottom = [
+            b + v
+            for b, v in zip(bottom, values)
+        ]
+
+    plt.title(title)
+    plt.xlabel("Number of Nodes")
+    plt.ylabel("Time [s]")
+
+    plt.xticks(
+        list(x),
+        d["nodes"].astype(str)
+    )
+
+    plt.grid(axis="y", alpha=.3)
+    plt.legend()
+    plt.tight_layout()
+
+    plt.savefig(
+        P / f"{name}.png",
+        dpi=220,
+        bbox_inches="tight"
+    )
+
+    plt.close()
+
+# MPI rank/thread phase breakdown
+def mpi_rank_thread_breakdown(name, mode, df):
+
+    d = (
+        df[df["mode"] == mode]
+        .copy()
+        .sort_values(["mpi_processes", "threads_per_process"])
+    )
+
+    labels = [
+        f"{int(row.mpi_processes)}r × {int(row.threads_per_process)}t"
+        for row in d.itertuples()
+    ]
+
+    x = range(len(d))
+    bottom = pd.Series(0.0, index=d.index)
+
+    plt.figure(figsize=(9, 5))
 
     for col, label in [
-        ("distribution_med", "Distribution"),
-        ("local_computation_med", "Local computation"),
+        ("spmv_med", "SpMV"),
+        ("normalize_med", "Normalize"),
+        ("rotate_med", "Rotate"),
         ("communication_med", "Communication"),
         ("reduction_med", "Reduction"),
         ("epoch_med", "Epoch")
     ]:
-        plt.bar(x, df[col], bottom=bottom, label=label)
-        bottom = bottom + df[col]
+        plt.bar(
+            x,
+            d[col],
+            bottom=bottom,
+            label=label
+        )
 
-    plt.title(title)
-    plt.xlabel("Number of MPI processes / nodes")
+        bottom = bottom + d[col]
+
+    n = int(d["n"].iloc[0])
+    nz = int(d["nz"].iloc[0])
+
+    plt.title(
+        f"MPI+OpenMP phase breakdown - {mode} workload\n"
+        f"N = {n:,}, nnz = {nz:,}"
+    )
+
+    plt.xlabel("MPI ranks × OpenMP threads per rank")
     plt.ylabel("Time [s]")
-    plt.xticks(x)
+
+    plt.xticks(
+        list(x),
+        labels
+    )
+
     plt.grid(axis="y", alpha=.3)
     plt.legend()
     plt.tight_layout()
-    plt.savefig(P / f"{name}.png", dpi=220, bbox_inches="tight")
+
+    plt.savefig(
+        P / f"{name}.png",
+        dpi=220,
+        bbox_inches="tight"
+    )
+
     plt.close()
 
-
-breakdown(
-    "11_mpi_strong_breakdown",
-    "MPI+OpenMP phase breakdown - strong scaling - irregular workload",
-    MS
+weak_scaling_breakdown(
+    "11_mpi_weak_scaling_breakdown",
+    "MPI+OpenMP Weak Scalability Time Breakdown",
+    MW
 )
 
-breakdown(
-    "12_mpi_weak_breakdown",
-    "MPI+OpenMP phase breakdown - weak scaling - irregular workload",
-    MW
+mpi_rank_thread_breakdown(
+    "11_mpi_rank_thread_breakdown_regular",
+    "regular",
+    MRT
+)
+
+mpi_rank_thread_breakdown(
+    "12_mpi_rank_thread_breakdown_irregular",
+    "irregular",
+    MRT
 )
 # MPI rank/thread sweep
 def mpi_rank_thread_sweep(name, mode, raw):
