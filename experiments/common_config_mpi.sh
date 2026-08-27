@@ -130,14 +130,16 @@ fi
 }
 
 run_mpi_rank_thread() {
-local ranks="$1"
-local threads="$2"
-shift 2
+local nodes="$1"
+local ranks="$2"
+local threads="$3"
+shift 3
+local ranks_per_node=$((ranks / nodes))
 
 srun --partition="$PARTITION" \
-  --nodes=1 \
+  --nodes="$nodes" \
   --ntasks="$ranks" \
-  --ntasks-per-node="$ranks" \
+  --ntasks-per-node="$ranks_per_node" \
   --cpus-per-task="$threads" \
   --hint=nomultithread \
   --mpi=pmix \

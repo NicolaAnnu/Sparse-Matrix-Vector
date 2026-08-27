@@ -9,6 +9,7 @@ SEED=$DEFAULT_SEED
 BLOCK_SIZE=$DEFAULT_MPI_BLOCK_SIZE
 
 MODES=("regular" "irregular")
+NODES = 1
 MPI_PROCESSES=(1 2 4)
 THREAD_COUNTS=(2 4)
 
@@ -38,7 +39,7 @@ for mode in "${MODES[@]}"; do
             for r in $(seq 1 "$REPEATS"); do
                 echo "Run $r/$REPEATS"
 
-                output=$(run_mpi_rank_thread "$mpi_processes" "$threads" \
+                output=$(run_mpi_rank_thread "$NODES" $mpi_processes" "$threads" \
                     -n "$N" \
                     -nz "$NZ" \
                     -m "$mode" \
