@@ -312,7 +312,7 @@ def mpi_rank_thread_breakdown(name, mode, df):
     plt.close()
 
 weak_scaling_breakdown(
-    "11_mpi_weak_scaling_breakdown",
+    "17_mpi_weak_scaling_breakdown",
     "MPI+OpenMP Weak Scalability Time Breakdown",
     MW, label_threshold=0.45
 )
