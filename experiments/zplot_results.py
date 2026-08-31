@@ -35,7 +35,7 @@ def groups(df, group, x, y, label):
 TG = read("THREAD_task_granularity.csv")
 RI = read("THREAD_regular_vs_irregular.csv")
 TS = read("THREAD_scaling.csv").sort_values("threads")
-OS = read("OPENMP_scaling.csv").sort_values("threads")
+OS = read("OPENMP_strong_scaling.csv").sort_values("threads")
 OG = read("OPENMP_task_granularity.csv")
 TW = read("OPENMP_task_vs_worksharing.csv")
 MG = read("MPI_task_granularity.csv")
@@ -176,7 +176,7 @@ def mpi_hybrid_balance_breakdown(name, df):
 
     plt.close()
 
-def weak_scaling_breakdown(name, title, df):
+def weak_scaling_breakdown(name, title, df, label_threshold=0.45):
 
     d = df.sort_values("nodes").copy()
 
@@ -210,12 +210,10 @@ def weak_scaling_breakdown(name, title, df):
             bottom=bottom,
             label=label
         )
-
-        # Values written inside each section
         plt.bar_label(
             bars,
             labels=[
-                f"{value:.2f}" if value >= 0.01 else ""
+                f"{value:.2f}" if value > label_threshold else ""
                 for value in values
             ],
             label_type="center",
@@ -316,7 +314,7 @@ def mpi_rank_thread_breakdown(name, mode, df):
 weak_scaling_breakdown(
     "11_mpi_weak_scaling_breakdown",
     "MPI+OpenMP Weak Scalability Time Breakdown",
-    MW
+    MW, label_threshold=0.45
 )
 
 mpi_rank_thread_breakdown(
