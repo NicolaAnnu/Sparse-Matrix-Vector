@@ -20,7 +20,6 @@ MW = read("MPI_weak_scaling.csv").sort_values("nodes")
 MRT_RAW = read("MPI_rank_thread_sweep_raw.csv")
 MRT = read("MPI_rank_thread_sweep.csv")
 MHB = read("MPI_hybrid_balance_sweep.csv")
-SMALL = read("OPENMP_vs_THREAD_small_matrix_scaling.csv")
 MPI_PHASES = [
     ("spmv_med", "SpMV"),
     ("normalize_med", "Normalize"),
@@ -79,11 +78,12 @@ def mpi_hybrid_balance_breakdown(name, df):
         plt.bar_label(
             bars,
             labels=[
-                f"{value:.2f}" if value >= 0.03 else ""
+                f"{value:.2f}" if value >= 0.12 else ""
                 for value in values
             ],
             label_type="center",
-            fontsize=8
+            fontsize=8,
+            fontweight="bold"
         )
 
         bottom = bottom + d[col]
@@ -186,69 +186,6 @@ def weak_scaling_breakdown(name, title, df, label_threshold=0.45):
         bbox_inches="tight"
     )
 
-    plt.close()
-    
-def plot_small_irregular_scaling(name, df):
-    d = df[
-        (df["mode"] == "irregular") &
-        (df["threads"].isin([2, 4, 8]))
-    ].sort_values("threads").copy()
-
-    # Media dei 3 run
-    d["thread_mean"] = d[
-        ["thread_run1", "thread_run2", "thread_run3"]
-    ].mean(axis=1)
-
-    d["openmp_mean"] = d[
-        ["openmp_run1", "openmp_run2", "openmp_run3"]
-    ].mean(axis=1)
-
-    # Deviazione standard per le error bar
-    d["thread_std"] = d[
-        ["thread_run1", "thread_run2", "thread_run3"]
-    ].std(axis=1)
-
-    d["openmp_std"] = d[
-        ["openmp_run1", "openmp_run2", "openmp_run3"]
-    ].std(axis=1)
-
-    n = int(d["n"].iloc[0])
-    nz = int(d["nz"].iloc[0])
-
-    plt.figure(figsize=(8, 5))
-
-    plt.errorbar(
-        d["threads"],
-        d["thread_mean"],
-        yerr=d["thread_std"],
-        marker="o",
-        capsize=4,
-        label="C++ Threads"
-    )
-
-    plt.errorbar(
-        d["threads"],
-        d["openmp_mean"],
-        yerr=d["openmp_std"],
-        marker="o",
-        capsize=4,
-        label="OpenMP"
-    )
-
-    plt.xlabel("number of threads")
-    plt.ylabel("execution time [s]")
-
-    plt.title(
-        f"Strong scaling - irregular workload - "
-        f"N = {n:,}, nnz = {nz:,} - execution time"
-    )
-
-    plt.xticks([2, 4, 8])
-    plt.grid(True, alpha=0.3)
-    plt.legend()
-
-    plt.tight_layout()
-    plt.savefig(P / f"{name}.png", dpi=300)
     plt.close()
 
 # MPI rank/thread phase breakdown
@@ -425,11 +362,6 @@ weak_scaling_breakdown(
     "17_mpi_weak_scaling_breakdown",
     "MPI+OpenMP Weak Scalability Time Breakdown",
     MW, label_threshold=0.45
-)
-
-plot_small_irregular_scaling(
-    "threads_vs_openmp_small_irregular",
-    SMALL
 )
 
 mpi_rank_thread_breakdown(
