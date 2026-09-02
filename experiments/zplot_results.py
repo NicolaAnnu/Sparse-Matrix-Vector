@@ -387,7 +387,7 @@ draw(
 
 draw("04_threads_vs_openmp_speedup", "C++ Threads vs OpenMP speedup", "Threads", "Speedup",
      [(OS.threads, OS.thread_speedup, "C++ Threads", "-"),
-      (OS.threads, OS.openmp_speedup, "OpenMP", "-")], list(OS.threads),
+      (OS.threads, OS.openmp_speedup, "OpenMP", "--")], list(OS.threads),
      ideal=(OS.threads, OS.threads, "Ideal"))
 
 b = sorted(OG.block_size.unique())
