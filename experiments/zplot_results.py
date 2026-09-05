@@ -117,6 +117,40 @@ def mpi_hybrid_balance_breakdown(name, df):
 
     plt.close()
 
+def weak_efficiency(df, output_path):
+    df = df.sort_values("nodes").copy()
+
+    # Weak-scaling efficiency: T(1) / T(p)
+    t1 = df.iloc[0]["time_med"]
+    df["weak_efficiency"] = t1 / df["time_med"]
+
+    plt.figure(figsize=(8, 5))
+
+    plt.plot(
+        df["nodes"],
+        df["weak_efficiency"],
+        marker="s",
+        label="Weak-Scaling Efficiency"
+    )
+
+    plt.axhline(
+        y=1.0,
+        linestyle="--",
+        label="Ideal Weak-Scaling Efficiency"
+    )
+
+    plt.xlabel("Number of Nodes")
+    plt.ylabel("Weak Scaling Efficiency")
+    plt.title("Weak Scalability: Weak-Scaling Efficiency")
+
+    plt.xticks(df["nodes"])
+    plt.grid(True, linestyle="--", alpha=0.5)
+    plt.legend()
+
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=300)
+    plt.close()
+
 def weak_scaling_breakdown(name, title, df, label_threshold=0.45):
 
     d = df.sort_values("nodes").copy()
@@ -426,6 +460,11 @@ draw(
 mpi_hybrid_balance_breakdown(
     "16_mpi_hybrid_balance_breakdown",
     MHB
+)
+
+weak_efficiency(
+    MW,
+    P / "19_mpi_weak_efficiency.png"
 )
 
 print(f"Plots saved in: {P}")
