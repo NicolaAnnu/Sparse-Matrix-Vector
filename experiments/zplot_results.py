@@ -641,14 +641,6 @@ for threads in sorted(MRT["threads_per_process"].unique()):
             )
         )
 
-draw(
-    "15_mpi_regular_vs_irregular",
-    "MPI+OpenMP: regular vs irregular workload",
-    "MPI processes",
-    "Time [s]",
-    curves,
-    sorted(MRT["mpi_processes"].unique())
-)
 mpi_hybrid_balance_breakdown(
     "16_mpi_hybrid_balance_breakdown",
     MHB
@@ -664,7 +656,7 @@ cpp_regular_vs_irregular_plot(
 )
 
 openmp_regular_vs_irregular_plot(
-    "21_openmp_regular_vs_irregular",
+    "15_openmp_regular_vs_irregular",
     RVI
 )
 
