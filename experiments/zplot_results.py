@@ -661,7 +661,7 @@ openmp_regular_vs_irregular_plot(
 )
 
 mpi_regular_vs_irregular_plot(
-    "2_mpi_regular_vs_irregular",
+    "02_mpi_regular_vs_irregular",
     RVI
 )
 print(f"Plots saved in: {P}")
