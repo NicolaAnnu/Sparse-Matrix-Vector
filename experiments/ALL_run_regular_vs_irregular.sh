@@ -1,14 +1,9 @@
 #!/bin/bash
 set -euo pipefail
-
-# Load the project's existing launch helpers.
-# The function names are distinct (run_cpp_threads, run_openmp, run_mpi),
-# while the shared variables/functions have compatible definitions.
 source ./common_config.sh
 source ./common_config_openmp.sh
 source ./common_config_mpi.sh
 
-# Fixed problem size used in the main experiments.
 N=1000000
 NZ=200000000
 SEED=111
@@ -21,14 +16,7 @@ BLOCK_SIZES=(1024 2048 4096)
 MPI_NODES=8
 MPI_PROCESSES=8
 
-OUT="$RESULTS_DIR/regular_vs_irregular_all.csv"
 FLAT_OUT="$RESULTS_DIR/regular_vs_irregular_all_flat.csv"
-
-# The first output intentionally follows the sectioned format of the reference
-# file shown in the comparison example.
-: > "$OUT"
-
-# The second output is a standard CSV, easier to load with pandas/Excel.
 echo "implementation,mode,n,nz,nodes,mpi_processes,threads,block_size,total_time_med" > "$FLAT_OUT"
 
 run_and_collect() {
@@ -95,9 +83,6 @@ run_and_collect() {
 # -----------------------------------------------------------------------------
 # C++ THREADS
 # -----------------------------------------------------------------------------
-echo "cpp threads" >> "$OUT"
-echo "mode,n,nz,threads,block_size,Total_Time_Med" >> "$OUT"
-
 for mode in "${MODES[@]}"; do
     for threads in "${THREAD_COUNTS[@]}"; do
         for block_size in "${BLOCK_SIZES[@]}"; do
@@ -106,7 +91,6 @@ for mode in "${MODES[@]}"; do
 
             med_tot=$(run_and_collect cpp_threads "$mode" "$threads" "$block_size")
 
-            echo "$mode,$N,$NZ,$threads,$block_size,$med_tot" >> "$OUT"
             echo "cpp_threads,$mode,$N,$NZ,1,1,$threads,$block_size,$med_tot" >> "$FLAT_OUT"
 
             echo "  -> Median Total Time: ${med_tot}s"
@@ -117,10 +101,6 @@ done
 # -----------------------------------------------------------------------------
 # OPENMP TASK-BASED
 # -----------------------------------------------------------------------------
-echo >> "$OUT"
-echo "OMP" >> "$OUT"
-echo "mode,n,nz,threads,block_size,Total_Time_Med" >> "$OUT"
-
 for mode in "${MODES[@]}"; do
     for threads in "${THREAD_COUNTS[@]}"; do
         for block_size in "${BLOCK_SIZES[@]}"; do
@@ -129,7 +109,6 @@ for mode in "${MODES[@]}"; do
 
             med_tot=$(run_and_collect openmp "$mode" "$threads" "$block_size")
 
-            echo "$mode,$N,$NZ,$threads,$block_size,$med_tot" >> "$OUT"
             echo "openmp,$mode,$N,$NZ,1,1,$threads,$block_size,$med_tot" >> "$FLAT_OUT"
 
             echo "  -> Median Total Time: ${med_tot}s"
@@ -140,10 +119,6 @@ done
 # -----------------------------------------------------------------------------
 # MPI + OPENMP
 # -----------------------------------------------------------------------------
-echo >> "$OUT"
-echo "MPI+OMP" >> "$OUT"
-echo "mode,n,nz,nodes,mpi_processes,threads_per_process,block_size,Total_Time_Med" >> "$OUT"
-
 for mode in "${MODES[@]}"; do
     for threads in "${THREAD_COUNTS[@]}"; do
         for block_size in "${BLOCK_SIZES[@]}"; do
@@ -152,7 +127,6 @@ for mode in "${MODES[@]}"; do
 
             med_tot=$(run_and_collect mpi_openmp "$mode" "$threads" "$block_size")
 
-            echo "$mode,$N,$NZ,$MPI_NODES,$MPI_PROCESSES,$threads,$block_size,$med_tot" >> "$OUT"
             echo "mpi_openmp,$mode,$N,$NZ,$MPI_NODES,$MPI_PROCESSES,$threads,$block_size,$med_tot" >> "$FLAT_OUT"
 
             echo "  -> Median Total Time: ${med_tot}s"
@@ -161,5 +135,4 @@ for mode in "${MODES[@]}"; do
 done
 
 echo
-echo "Done. Sectioned results: $OUT"
-echo "Done. Flat CSV results: $FLAT_OUT"
+echo "Done. Results: $FLAT_OUT"

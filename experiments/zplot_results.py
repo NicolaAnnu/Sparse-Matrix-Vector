@@ -9,7 +9,6 @@ P.mkdir(exist_ok=True)
 read = lambda f: pd.read_csv(R / f)
 
 TG = read("THREAD_task_granularity.csv")
-RI = read("THREAD_regular_vs_irregular.csv")
 TS = read("THREAD_scaling.csv").sort_values("threads")
 OS = read("OPENMP_strong_scaling.csv").sort_values("threads")
 OG = read("OPENMP_task_granularity.csv")
@@ -20,6 +19,8 @@ MW = read("MPI_weak_scaling.csv").sort_values("nodes")
 MRT_RAW = read("MPI_rank_thread_sweep_raw.csv")
 MRT = read("MPI_rank_thread_sweep.csv")
 MHB = read("MPI_hybrid_balance_sweep.csv")
+RVI = read("regular_vs_irregular_all_flat.csv")
+
 MPI_PHASES = [
     ("spmv_med", "SpMV"),
     ("normalize_med", "Normalize"),
@@ -336,13 +337,204 @@ def mpi_rank_thread_sweep(name, mode, raw):
 
     plt.close()
 
+def cpp_regular_vs_irregular_plot(name, df):
+
+    d = df[df["implementation"] == "cpp_threads"].copy()
+
+    plt.figure(figsize=(7, 4.5))
+
+    for threads in sorted(d["threads"].unique()):
+
+        regular = (
+            d[
+                (d["threads"] == threads) &
+                (d["mode"] == "regular")
+            ]
+            .sort_values("block_size")
+        )
+
+        irregular = (
+            d[
+                (d["threads"] == threads) &
+                (d["mode"] == "irregular")
+            ]
+            .sort_values("block_size")
+        )
+
+        plt.plot(
+            regular["block_size"],
+            regular["total_time_med"],
+            marker="o",
+            linestyle="-",
+            label=f"Regular, {threads} threads"
+        )
+
+        plt.plot(
+            irregular["block_size"],
+            irregular["total_time_med"],
+            marker="o",
+            linestyle="--",
+            label=f"Irregular, {threads} threads"
+        )
+
+    plt.title("C++ Threads: regular vs irregular workload")
+    plt.xlabel("Block size")
+    plt.ylabel("Time [s]")
+
+    plt.xscale("log", base=2)
+    plt.xticks(
+        sorted(d["block_size"].unique()),
+        [str(x) for x in sorted(d["block_size"].unique())]
+    )
+
+    plt.grid(alpha=.3)
+    plt.legend()
+    plt.tight_layout()
+
+    plt.savefig(
+        P / f"{name}.png",
+        dpi=220,
+        bbox_inches="tight"
+    )
+
+    plt.close()
+
+
+def openmp_regular_vs_irregular_plot(name, df):
+
+    d = df[df["implementation"] == "openmp"].copy()
+
+    plt.figure(figsize=(7, 4.5))
+
+    for threads in sorted(d["threads"].unique()):
+
+        regular = (
+            d[
+                (d["threads"] == threads) &
+                (d["mode"] == "regular")
+            ]
+            .sort_values("block_size")
+        )
+
+        irregular = (
+            d[
+                (d["threads"] == threads) &
+                (d["mode"] == "irregular")
+            ]
+            .sort_values("block_size")
+        )
+
+        plt.plot(
+            regular["block_size"],
+            regular["total_time_med"],
+            marker="o",
+            linestyle="-",
+            label=f"Regular, {threads} threads"
+        )
+
+        plt.plot(
+            irregular["block_size"],
+            irregular["total_time_med"],
+            marker="o",
+            linestyle="--",
+            label=f"Irregular, {threads} threads"
+        )
+
+    plt.title("OpenMP: regular vs irregular workload")
+    plt.xlabel("Block size")
+    plt.ylabel("Time [s]")
+
+    plt.xscale("log", base=2)
+    plt.xticks(
+        sorted(d["block_size"].unique()),
+        [str(x) for x in sorted(d["block_size"].unique())]
+    )
+
+    plt.grid(alpha=.3)
+    plt.legend()
+    plt.tight_layout()
+
+    plt.savefig(
+        P / f"{name}.png",
+        dpi=220,
+        bbox_inches="tight"
+    )
+
+    plt.close()
+
+
+def mpi_regular_vs_irregular_plot(name, df):
+
+    d = df[df["implementation"] == "mpi_openmp"].copy()
+
+    plt.figure(figsize=(7, 4.5))
+
+    for threads in sorted(d["threads"].unique()):
+
+        regular = (
+            d[
+                (d["threads"] == threads) &
+                (d["mode"] == "regular")
+            ]
+            .sort_values("block_size")
+        )
+
+        irregular = (
+            d[
+                (d["threads"] == threads) &
+                (d["mode"] == "irregular")
+            ]
+            .sort_values("block_size")
+        )
+
+        plt.plot(
+            regular["block_size"],
+            regular["total_time_med"],
+            marker="o",
+            linestyle="-",
+            label=f"Regular, {threads} threads/rank"
+        )
+
+        plt.plot(
+            irregular["block_size"],
+            irregular["total_time_med"],
+            marker="o",
+            linestyle="--",
+            label=f"Irregular, {threads} threads/rank"
+        )
+
+    nodes = int(d["nodes"].iloc[0])
+    ranks = int(d["mpi_processes"].iloc[0])
+
+    plt.title(
+        f"MPI+OpenMP: regular vs irregular workload\n"
+        f"{nodes} nodes, {ranks} MPI ranks"
+    )
+
+    plt.xlabel("Block size")
+    plt.ylabel("Time [s]")
+
+    plt.xscale("log", base=2)
+    plt.xticks(
+        sorted(d["block_size"].unique()),
+        [str(x) for x in sorted(d["block_size"].unique())]
+    )
+
+    plt.grid(alpha=.3)
+    plt.legend()
+    plt.tight_layout()
+
+    plt.savefig(
+        P / f"{name}.png",
+        dpi=220,
+        bbox_inches="tight"
+    )
+
+    plt.close()
+
 b = sorted(TG.block_size.unique())
 draw("01_thread_granularity", "C++ Threads granularity - irregular", "Block size", "Time [s]",
      groups(TG, "threads", "block_size", "time_med", lambda t: f"{t} threads"), b, True)
-
-draw("02_regular_vs_irregular", "C++ Threads: regular vs irregular", "Threads", "Time [s]",
-     [(d.threads, d.thread_time_med, m.capitalize(), "-") for m in ("regular", "irregular")
-      for d in [RI[RI["mode"] == m].sort_values("threads")]], sorted(RI.threads.unique()))
 
 draw(
     "03_threads_vs_openmp_time",
@@ -466,5 +658,18 @@ weak_efficiency(
     MW,
     P / "19_mpi_weak_efficiency.png"
 )
+cpp_regular_vs_irregular_plot(
+    "20_cpp_regular_vs_irregular",
+    RVI
+)
 
+openmp_regular_vs_irregular_plot(
+    "21_openmp_regular_vs_irregular",
+    RVI
+)
+
+mpi_regular_vs_irregular_plot(
+    "2_mpi_regular_vs_irregular",
+    RVI
+)
 print(f"Plots saved in: {P}")
