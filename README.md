@@ -1,13 +1,14 @@
-# Iterative SpMV
+# Iterative Sparse Matrix-Vector Computation
 
-Four implementations of an iterative sparse matrix-vector computation with
-periodic logical row shifts: sequential reference, C++ threads (custom
-ThreadPool), OpenMP (task-based and work-sharing), and MPI+OpenMP.
+This project explores parallel iterative SpMV with periodic logical shifts
+of matrix rows. A sequential reference is accompanied by C++ threads with a
+custom ThreadPool, OpenMP task-based and work-sharing variants, and a hybrid
+MPI+OpenMP implementation.
 
-See `REPORT_SPM..pdf` for implementation strategies, correctness methodology,
-and the full experimental analysis.
+Implementation choices, validation methodology, and experimental analysis
+are discussed in `REPORT_SPM..pdf`.
 
-## Project structure
+## Source layout
 
 ```text
 sequential/   sequential reference (iterative_SpMV.cpp)
@@ -18,9 +19,10 @@ mpi/          MPI+OpenMP distributed version (mpi_SpMV.cpp)
 experiments/  scripts, CSV results, and plots for the experimental analysis
 ```
 
-## Build
+## Compilation
 
-From the project root, execute the following commands on a compute node:
+Building requires a C++20 compiler with OpenMP support and an MPI installation
+providing `mpic++`. On a compute node, run these commands from the project root:
 
 ```bash
 g++ -O3 -std=c++20 sequential/iterative_SpMV.cpp -o seq
@@ -30,13 +32,12 @@ g++ -O3 -std=c++20 -fopenmp openmp/openmp_SpMV_worksharing.cpp -o openmp_SpMV_wo
 mpic++ -O3 -std=c++20 -fopenmp mpi/mpi_SpMV.cpp -o mpi/mpi
 ```
 
-Requires a C++20 compiler with OpenMP support and an MPI implementation
-providing `mpic++`. Executables are placed in the project root, except for
-the MPI executable, which is placed inside `mpi/`.
+The resulting binaries are created in the project root; the distributed
+executable is the exception and is stored as `mpi/mpi`.
 
-## Running
+## Execution and output
 
-All executables share the same core arguments:
+Specify the matrix and generation seed through these common parameters:
 
 ```text
 -n N        matrix size, N x N
@@ -45,8 +46,8 @@ All executables share the same core arguments:
 -s seed     optional, default 111
 ```
 
-Parallel versions additionally take `-t` (worker threads, per rank for MPI)
-and `-b` (rows per chunk, default 1024). MPI+OpenMP is launched with `mpirun`:
+For parallel execution, `-t` sets the worker count (per MPI rank), while `-b`
+sets rows per chunk and defaults to 1024. Example invocations are:
 
 ```bash
 ./seq -n 500000 -nz 20000000 -m irregular
@@ -56,36 +57,38 @@ and `-b` (rows per chunk, default 1024). MPI+OpenMP is launched with `mpirun`:
 mpirun -n 4 ./mpi/mpi -n 500000 -nz 20000000 -m irregular -t 4 -b 1024
 ```
 
-Each run prints the Rayleigh value, a checksum, and execution time.
-MPI+OpenMP also reports distribution, SpMV, normalization, rotation,
-communication, global reduction, and epoch-transition timings.
+Use `mpirun` for the hybrid version. All programs report execution time, a
+Rayleigh value, and a checksum. MPI+OpenMP additionally measures distribution,
+SpMV, normalization, rotation, communication, global reduction, and epoch
+transitions.
 
-## Correctness checks
+## Validation
 
-Compare each implementation against the sequential reference using identical
-inputs and seed. Pass `--dump-vector FILE` to dump the final normalized
-vector outside the timed region:
+Validation uses the sequential result as a reference, with matching input
+parameters and seed. A strong check compares final vectors element by element
+within a numerical tolerance. Export them with `--dump-vector FILE`; file
+writing is excluded from the measured computation:
 
 ```bash
 ./seq -n 5000 -nz 20000 -m irregular --dump-vector seq.dump
 mpirun -n 2 ./mpi/mpi -n 5000 -nz 20000 -m irregular -t 2 -b 1024 --dump-vector mpi.dump
 ```
 
-For a strong check, compare the dumped vectors element by element within a
-numerical tolerance. For larger inputs, comparing the Rayleigh values provides
-a weaker consistency check. Parallel floating-point reduction order can
-produce small differences, so bitwise-identical vectors or checksums are
-not required.
+On larger problems, Rayleigh values offer a weaker consistency check.
+Differences in floating-point reduction order may cause small numerical
+variations; neither vectors nor checksums must therefore match bitwise.
 
-## Reproducing the experiments
+## Experimental workflow
 
-Run the `*_run_*.sh` scripts from `experiments/` on the spmcluster login node;
-they request resources through `srun`. Set `MPI_BIN="../mpi/mpi"` in
-`common_config_mpi.sh` to match the build above, and review the shared
-configuration files and experiment parameters before running.
+The experiments investigate scaling, speedup, task granularity, OpenMP tasks
+versus work-sharing, regular versus irregular matrices, and MPI rank/thread
+balance. Some runs depend on CSV results from earlier experiments.
 
-Experiments cover scaling, speedup, task granularity, task-based versus
-work-sharing OpenMP, regular versus irregular matrices, and MPI rank/thread
-balance. Some scripts reuse earlier CSV results. `zplot_results.py` generates
-plots using pandas and Matplotlib; its `regular_vs_irregular_all_flat.csv`
-input is produced by `ALL_run_regular_vs_irregular.sh`.
+Before starting, review experiment parameters and shared configuration files.
+Set `MPI_BIN="../mpi/mpi"` in `common_config_mpi.sh` for the binary location
+above. Launch `*_run_*.sh` from `experiments/` on the spmcluster login node;
+resource requests are handled by `srun`.
+
+For plotting, `zplot_results.py` uses pandas and Matplotlib. Its input
+`regular_vs_irregular_all_flat.csv` is generated by
+`ALL_run_regular_vs_irregular.sh`.
