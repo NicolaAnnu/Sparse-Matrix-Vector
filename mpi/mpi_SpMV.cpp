@@ -37,6 +37,8 @@
 static constexpr std::uint32_t NUM_ITERS = 500;
 static constexpr std::uint32_t EPOCH_LEN = 25;
 
+// Computes a circular row shift, using an odd offset to vary row positions
+// and ensuring a non-zero shift so each epoch changes the logical row mapping.
 static std::size_t compute_shift_rows(std::size_t n) {
     std::size_t shift = n / 16 + 17;
     if ((shift % 2) == 0) ++shift;
@@ -49,21 +51,24 @@ struct alignas(64) PaddedDouble {
     double value = 0.0;
 };
 
-// Same static partitioning used in the OpenMP implementation.
+// Computes the dot product using OpenMP tasks with static vector partitions.
 static double dot(const std::vector<double>& a,
                   const std::vector<double>& b,
                   std::size_t worker_count) {
     if (a.size() != b.size())
         throw std::runtime_error("dot: incompatible vector sizes");
     if (a.empty()) return 0.0;
-
+     // Limit the number of tasks to the vector size and allocate padded partial sums.
     worker_count = std::min(worker_count, a.size());
     std::vector<PaddedDouble> partial(worker_count);
 
     for (std::size_t worker = 0; worker < worker_count; ++worker) {
+
+        // Statically partition the vector into contiguous ranges.
         const std::size_t begin = a.size() * worker / worker_count;
         const std::size_t end   = a.size() * (worker + 1) / worker_count;
 
+        // Each OpenMP task computes an independent partial dot product.
         #pragma omp task default(none) shared(a, b, partial) firstprivate(worker, begin, end)
         {
             double local = 0.0;
@@ -73,6 +78,7 @@ static double dot(const std::vector<double>& a,
         }
     }
 
+    // Wait for all tasks before combining their partial results.
     #pragma omp taskwait
 
     double total = 0.0;
@@ -84,19 +90,22 @@ static void parallel_scale(std::vector<double>& x,
                            double factor,
                            std::size_t worker_count) {
     if (x.empty()) return;
-
+    // Limit the number of tasks to the vector size.
     worker_count = std::min(worker_count, x.size());
     for (std::size_t worker = 0; worker < worker_count; ++worker) {
+
+        // Statically partition the vector into contiguous ranges.
         const std::size_t begin = x.size() * worker / worker_count;
         const std::size_t end   = x.size() * (worker + 1) / worker_count;
 
+        // Each OpenMP task independently scales its assigned vector elements.
         #pragma omp task default(none) shared(x) firstprivate(factor, begin, end)
         {
             for (std::size_t i = begin; i < end; ++i)
                 x[i] *= factor;
         }
     }
-
+    // Wait for all scaling tasks to complete.
     #pragma omp taskwait
 }
 
@@ -115,9 +124,12 @@ static double local_spmv_csr(
     std::size_t chunk_size)
 {
     const std::size_t local_n = y.size();
+
+    // Divide the local rows into chunks to be processed by OpenMP tasks.
     const std::size_t chunks =
         (local_n + chunk_size - 1) / chunk_size;
 
+    // Store partial squared norms with padding to reduce false sharing.
     std::vector<PaddedDouble> partial_norm(chunks);
 
     for (std::size_t chunk = 0; chunk < chunks; ++chunk) {
@@ -125,12 +137,14 @@ static double local_spmv_csr(
         const std::size_t end =
             std::min(begin + chunk_size, local_n);
 
+        // Each task computes SpMV on its assigned rows and accumulates a partial squared norm.
         #pragma omp task default(none) \
             shared(row_ptr, col_idx, values, x, y, partial_norm) \
             firstprivate(begin, end, chunk)
         {
             double local_norm = 0.0;
 
+            // Traverse the non-zero elements of the current CSR row.
             for (std::size_t row = begin; row < end; ++row) {
                 double sum = 0.0;
 
@@ -149,6 +163,7 @@ static double local_spmv_csr(
         }
     }
 
+    // Ensure all SpMV tasks have completed before combining partial norms.
     #pragma omp taskwait
 
     double norm2 = 0.0;
@@ -165,12 +180,14 @@ static void rotate_vector(const std::vector<double>& source,
                           std::size_t row_shift,
                           std::size_t chunk_size) {
     const std::size_t n = source.size();
+    // Divide the global vector into chunks for parallel processing.
     const std::size_t chunks = (n + chunk_size - 1) / chunk_size;
 
     for (std::size_t chunk = 0; chunk < chunks; ++chunk) {
         const std::size_t begin = chunk * chunk_size;
         const std::size_t end   = std::min(begin + chunk_size, n);
 
+        // Each OpenMP task applies the circular shift to its assigned elements
         #pragma omp task default(none) shared(source, logical) firstprivate(begin, end, row_shift, n)
         {
             for (std::size_t i = begin; i < end; ++i)
@@ -178,6 +195,7 @@ static void rotate_vector(const std::vector<double>& source,
         }
     }
 
+    // Wait for all rotation tasks before using the resulting vector.
     #pragma omp taskwait
 }
 
@@ -206,7 +224,6 @@ static IterativeResult distributed_iterative_spmv(
 
     const std::size_t shift_rows = compute_shift_rows(n);
 
-    // Phase 1: distribute contiguous row ranges, approximately balanced by NNZ.
     const auto td0 = std::chrono::steady_clock::now();
 
     std::vector<int> row_counts(num_ranks), row_displacements(num_ranks);
@@ -215,11 +232,14 @@ static IterativeResult distributed_iterative_spmv(
         std::vector<std::size_t> boundary(num_ranks + 1, 0);
         boundary[num_ranks] = n;
 
+        // Partition contiguous rows by cumulative NNZ to balance the SpMV workload.
         for (int r = 1; r < num_ranks; ++r) {
             const std::uint64_t target = (nz / num_ranks) * r;
             auto it = std::lower_bound(global_A.row_ptr.begin(),
                                        global_A.row_ptr.end(), target);
             std::size_t b = static_cast<std::size_t>(it - global_A.row_ptr.begin());
+
+            // Preserve valid boundaries and guarantee at least one row per rank.
             b = std::max(b, boundary[r - 1] + 1);
             b = std::min(b, n - static_cast<std::size_t>(num_ranks - r));
             boundary[r] = b;
@@ -249,6 +269,7 @@ static IterativeResult distributed_iterative_spmv(
         }
     }
 
+    // Send local NNZ counts first to allocate correctly sized CSR buffers.
     int local_nnz = 0;
     MPI_Scatter(nnz_counts.data(), 1, MPI_INT,
                 &local_nnz, 1, MPI_INT, 0, MPI_COMM_WORLD);
@@ -257,6 +278,7 @@ static IterativeResult distributed_iterative_spmv(
     std::vector<std::uint32_t> local_col_idx(local_nnz);
     std::vector<std::uint64_t> local_row_ptr(local_n + 1);
 
+    // Distribute variable-sized CSR partitions without replicating the matrix.
     MPI_Scatterv(rank == 0 ? global_A.values.data() : nullptr,
                  nnz_counts.data(), nnz_displacements.data(), MPI_DOUBLE,
                  local_values.data(), local_nnz, MPI_DOUBLE, 0, MPI_COMM_WORLD);
@@ -269,16 +291,18 @@ static IterativeResult distributed_iterative_spmv(
                  ptr_counts.data(), ptr_displacements.data(), MPI_UINT64_T,
                  local_row_ptr.data(), local_n + 1, MPI_UINT64_T, 0, MPI_COMM_WORLD);
 
+    // Convert global CSR offsets into local offsets starting from zero.
     const std::uint64_t offset = local_row_ptr[0];
     for (auto& p : local_row_ptr) p -= offset;
 
     const auto td1 = std::chrono::steady_clock::now();
     double distribution_time = std::chrono::duration<double>(td1 - td0).count();
 
-    // Phase 2: same iterative structure as the OpenMP implementation.
+    // Replicate global vectors while keeping the SpMV output distributed.
     std::vector<double> x(n), y(n), global_out(n);
     std::vector<double> local_out(local_n);
 
+    // Reproduce the same initial vector independently on every rank.
     SplitMix64 rng(seed ^ 0x123456789abcdef0ULL);
     for (double& v : x) v = rng.next_unit();
 
@@ -294,7 +318,7 @@ static IterativeResult distributed_iterative_spmv(
 
     #pragma omp parallel num_threads(worker_count) shared(x, y, global_out, local_out, row_shift, rayleigh, checksum)
     {
-        // The OpenMP master is also the only thread that calls MPI.
+        // Restrict MPI calls to the master thread, following MPI_THREAD_FUNNELED.
         #pragma omp master
         {
             auto t0 = std::chrono::steady_clock::now();
@@ -303,6 +327,8 @@ static IterativeResult distributed_iterative_spmv(
             normalize_time += std::chrono::duration<double>(t1 - t0).count();
 
             for (std::uint32_t iter = 0; iter < NUM_ITERS; ++iter) {
+
+                // Evolve the matrix through a logical shift without moving CSR data.
                 if (iter > 0 && (iter % EPOCH_LEN) == 0) {
                     t0 = std::chrono::steady_clock::now();
                     row_shift = (row_shift + shift_rows) % n;
@@ -322,6 +348,7 @@ static IterativeResult distributed_iterative_spmv(
                 t1 = std::chrono::steady_clock::now();
                 spmv_time += std::chrono::duration<double>(t1 - t0).count();
 
+                // Combine local squared norms to normalize using the global norm.
                 double global_norm2 = 0.0;
                 t0 = std::chrono::steady_clock::now();
                 MPI_Allreduce(&local_norm2, &global_norm2, 1,
@@ -334,6 +361,7 @@ static IterativeResult distributed_iterative_spmv(
                 t1 = std::chrono::steady_clock::now();
                 normalize_time += std::chrono::duration<double>(t1 - t0).count();
 
+                // Reconstruct the complete normalized vector on every rank.
                 t0 = std::chrono::steady_clock::now();
                 MPI_Allgatherv(local_out.data(), local_n, MPI_DOUBLE,
                                global_out.data(), row_counts.data(),
@@ -341,6 +369,7 @@ static IterativeResult distributed_iterative_spmv(
                 t1 = std::chrono::steady_clock::now();
                 communication_time += std::chrono::duration<double>(t1 - t0).count();
 
+                // Apply the logical row permutation before the next iteration.
                 t0 = std::chrono::steady_clock::now();
                 rotate_vector(global_out, y, row_shift, chunk_size);
                 x.swap(y);
@@ -348,7 +377,7 @@ static IterativeResult distributed_iterative_spmv(
                 rotate_time += std::chrono::duration<double>(t1 - t0).count();
             }
 
-            // Phase 3: final diagnostics, as in the OpenMP version.
+            // Compute final diagnostics using the evolved matrix and final vector.
             local_spmv_csr(local_row_ptr, local_col_idx, local_values,
                            x, local_out, chunk_size);
             MPI_Allgatherv(local_out.data(), local_n, MPI_DOUBLE,
@@ -444,6 +473,7 @@ int main(int argc, char** argv) {
         GeneratedMatrix G;
         double generation_sec = 0.0;
 
+         // Generate starting matrix
         if (rank == 0) {
             const auto tg0 = std::chrono::steady_clock::now();
             G = generate_matrix(n, nz, seed, mode);
@@ -459,6 +489,8 @@ int main(int argc, char** argv) {
             dump_vector_path.empty() ? nullptr : &final_vector;
 
         // Phase 2: timed distributed computation.
+
+        // Synchronize all ranks before starting the timed computation.
         MPI_Barrier(MPI_COMM_WORLD);
         const auto tc0 = std::chrono::steady_clock::now();
 
@@ -466,6 +498,7 @@ int main(int argc, char** argv) {
             rank, num_ranks, G.A, nz, n, seed,
             worker_count, chunk_size, final_vector_out);
 
+        // Ensure all ranks have completed before stopping the timer.
         MPI_Barrier(MPI_COMM_WORLD);
         const auto tc1 = std::chrono::steady_clock::now();
 
@@ -495,6 +528,8 @@ int main(int argc, char** argv) {
         }
     } catch (const std::exception& e) {
         std::cerr << "Error on rank " << rank << ": " << e.what() << "\n";
+
+        // Abort the entire MPI communicator if any rank encounters an error.
         MPI_Abort(MPI_COMM_WORLD, 1);
     }
 

@@ -23,9 +23,9 @@
 //   g++ -O3 -std=c++17 -fopenmp -I. -Wall -Wextra -Wpedantic openmp_SpMV.cpp -o openmp_spmv
 //
 // Examples:
-//   ./openmp_spmv -n 500000 -nz 20000000 -m regular -t 2
-//   ./openmp_spmv -n 500000 -nz 20000000 -m irregular -t 4 -b 1024
-//   ./openmp_spmv -n 5000 -nz 20000 -m irregular -t 2 -b 1024 --dump-vector omp_vec.dump
+//   ./openmp_SpMV -n 500000 -nz 20000000 -m regular -t 2
+//   ./openmp_SpMV -n 500000 -nz 20000000 -m irregular -t 4 -b 1024
+//   ./openmp_SpMV -n 5000 -nz 20000 -m irregular -t 2 -b 1024 --dump-vector omp_vec.dump
 //
 // Notes:
 //   - Matrix generation is not included in computation time and has its own timer.
@@ -33,7 +33,7 @@
 //   - Dot product and vector scaling use static partitions, one task per partition.
 //   - SpMV uses task-based chunk scheduling managed by the OpenMP runtime.
 //   - The computation uses a fixed number of iterations.
-//   - The main workload is the irregular case.
+//   - Both regular and irregular workloads are supported; irregular is the main benchmark case.
 
 #include <algorithm>
 #include <chrono>
@@ -54,6 +54,7 @@ static constexpr std::uint32_t NUM_ITERS = 500;
 static constexpr std::uint32_t EPOCH_LEN = 25;
 
 static std::size_t compute_shift_rows(std::size_t n) {
+    // Choose an initially odd circular offset and avoid a zero shift between epochs.
     std::size_t shift = n / 16 + 17;
     if ((shift % 2) == 0) {
         ++shift;
@@ -69,8 +70,6 @@ struct alignas(64) PaddedDouble {
     double value = 0.0;
 };
 
-// Static partitioning, as in the original ThreadPool implementation.
-// This function must be called from inside an OpenMP parallel region.
 static double dot(
     const std::vector<double>& a,
     const std::vector<double>& b,
@@ -80,13 +79,16 @@ static double dot(
         throw std::runtime_error("dot: incompatible vector sizes");
     }
 
+    // Limit tasks to the vector size and use padded sums to reduce false sharing.
     worker_count = std::min(worker_count, a.size());
     std::vector<PaddedDouble> partial(worker_count);
 
     for (std::size_t worker = 0; worker < worker_count; ++worker) {
+        // Statically partition the vectors into contiguous ranges.
         const std::size_t begin = a.size() * worker / worker_count;
         const std::size_t end   = a.size() * (worker + 1) / worker_count;
 
+        // Each task computes an independent partial dot product.
         #pragma omp task default(none) shared(a, b, partial) firstprivate(worker, begin, end)
         {
             double local = 0.0;
@@ -99,7 +101,7 @@ static double dot(
         }
     }
 
-    // Replaces waiting on all futures in the ThreadPool implementation.
+    // Wait for all tasks before combining their partial results.
     #pragma omp taskwait
 
     double total = 0.0;
@@ -110,19 +112,20 @@ static double dot(
     return total;
 }
 
-// Static partitioning, as in parallel_for_workers() from the ThreadPool version.
-// This function must be called from inside an OpenMP parallel region.
 static void parallel_scale(
     std::vector<double>& vector,
     double factor,
     std::size_t worker_count)
 {
+    // Limit the number of tasks to the vector size.
     worker_count = std::min(worker_count, vector.size());
 
     for (std::size_t worker = 0; worker < worker_count; ++worker) {
+        // Statically partition the vector into contiguous ranges.
         const std::size_t begin = vector.size() * worker / worker_count;
         const std::size_t end   = vector.size() * (worker + 1) / worker_count;
 
+        // Each task independently scales its assigned elements.
         #pragma omp task default(none) shared(vector) firstprivate(factor, begin, end)
         {
             for (std::size_t i = begin; i < end; ++i) {
@@ -131,10 +134,10 @@ static void parallel_scale(
         }
     }
 
+    // Wait for all scaling tasks to complete.
     #pragma omp taskwait
 }
 
-// This function must be called from inside an OpenMP parallel region.
 static void normalize(
     std::vector<double>& vector,
     std::size_t worker_count)
@@ -148,12 +151,6 @@ static void normalize(
         worker_count);
 }
 
-// Task-based SpMV.
-// The original ThreadPool version launched worker_count long-lived jobs and
-// used an atomic next_chunk counter. Here we instead create one OpenMP task
-// for every chunk and let the OpenMP runtime dynamically assign those tasks
-// to the available threads.
-// This function must be called from inside an OpenMP parallel region.
 static void spmv_csr_shifted_rows(
     const CSRMatrix& matrix,
     std::size_t row_shift,
@@ -169,6 +166,7 @@ static void spmv_csr_shifted_rows(
         y.resize(matrix.n);
     }
 
+    // Divide the logical rows into chunks processed by OpenMP tasks.
     const std::size_t number_of_chunks =
         (matrix.n + chunk_size - 1) / chunk_size;
 
@@ -176,17 +174,20 @@ static void spmv_csr_shifted_rows(
         const std::size_t begin = chunk * chunk_size;
         const std::size_t end   = std::min(begin + chunk_size, matrix.n);
 
+        // The OpenMP runtime schedules one independent task per chunk.
         #pragma omp task default(none) shared(matrix, x, y) firstprivate(row_shift, begin, end)
         {
             for (std::size_t logical_row = begin;
                  logical_row < end;
                  ++logical_row) {
 
+                // Map each logical row to its CSR source without moving matrix data.
                 const std::size_t source_row =
                     (logical_row + matrix.n - row_shift) % matrix.n;
 
                 double sum = 0.0;
 
+                // Traverse the non-zero elements of the selected CSR row.
                 for (std::uint64_t position = matrix.row_ptr[source_row];
                      position < matrix.row_ptr[source_row + 1];
                      ++position) {
@@ -200,8 +201,7 @@ static void spmv_csr_shifted_rows(
         }
     }
 
-    // The single/orchestrating task cannot continue to normalization until
-    // every SpMV chunk for this iteration has completed.
+    // Ensure all SpMV tasks finish before the next normalization.
     #pragma omp taskwait
 }
 
@@ -221,33 +221,30 @@ static IterativeResult iterative_spmv_evolving(
     const std::size_t n = A.n;
     const std::size_t shift_rows = compute_shift_rows(n);
 
-    // PHASE 1: preserve exactly the same sequential RNG initialization.
     std::vector<double> x(n);
     std::vector<double> y(n);
 
+    // Reproduce the same initial vector as the sequential implementation.
     SplitMix64 rng(seed ^ 0x123456789abcdef0ULL);
     for (double& v : x) {
         v = rng.next_unit();
     }
 
-    // Values produced inside the OpenMP region and returned afterwards.
     std::size_t row_shift = 0;
     double rayleigh = 0.0;
     std::uint64_t checksum = 0;
 
-    // Persistent OpenMP team: created once and reused for normalization,
-    // every SpMV iteration, and the final diagnostics.
+    // Create one OpenMP team reused throughout all iterations and diagnostics.
     #pragma omp parallel num_threads(worker_count) shared(x, y, row_shift, rayleigh, checksum)
     {
-        // A single thread orchestrates the sequential control flow and creates
-        // tasks. All threads in the team are allowed to execute those tasks.
+        // A single thread generates tasks that any thread in the team can execute.
         #pragma omp single
         {
             // The initialized vector must be normalized before iteration 0.
             normalize(x, worker_count);
 
-            // PHASE 2: iterative computation on the evolving matrix.
             for (std::uint32_t iter = 0; iter < NUM_ITERS; ++iter) {
+                // Evolve the matrix through a logical shift without moving CSR data.
                 if (iter > 0 && (iter % EPOCH_LEN) == 0) {
                     row_shift = (row_shift + shift_rows) % n;
                 }
@@ -261,12 +258,11 @@ static IterativeResult iterative_spmv_evolving(
 
                 normalize(y, worker_count);
 
-                // Both SpMV and normalize() end with taskwait, therefore no
-                // task still accesses x/y here.
+                // Swap vectors only after all tasks have completed.
                 x.swap(y);
             }
 
-            // PHASE 3: final diagnostics for correctness checks.
+            // Compute final diagnostics using the evolved matrix and final vector.
             spmv_csr_shifted_rows(
                 A,
                 row_shift,
@@ -276,8 +272,6 @@ static IterativeResult iterative_spmv_evolving(
 
             rayleigh = dot(x, y, worker_count);
 
-            // Preserve the checksum implementation used by the original code.
-            // It is executed by the single orchestrating thread.
             checksum = checksum_vector(x);
         }
     }

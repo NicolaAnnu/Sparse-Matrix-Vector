@@ -34,12 +34,11 @@
 //
 // Minimal build:
 //   g++ -O3 -std=c++17 -pthread -I. -Wall -Wextra -Wpedantic 
-//       cpp_threads_SpMV.cpp -o cpp_threads
 //
 // Examples:
-//   ./cpp_threads -n 500000 -nz 20000000 -m regular -t 2
-//   ./cpp_threads -n 500000 -nz 20000000 -m irregular -t 4 -b 1024
-//   ./cpp_threads -n 5000 -nz 20000 -m irregular -t 2 -b 1024 --dump-vector thread_vec.dump
+//   ././thread_SpMV -n 500000 -nz 20000000 -m regular -t 2
+//   ././thread_SpMV -n 500000 -nz 20000000 -m irregular -t 4 -b 1024
+//   ././thread_SpMV -n 5000 -nz 20000 -m irregular -t 2 -b 1024 --dump-vector thread_vec.dump
 //
 // Notes:
 //   - Matrix generation is not included in computation time and has its own timer.
@@ -70,6 +69,7 @@
 static constexpr std::uint32_t NUM_ITERS = 500;
 static constexpr std::uint32_t EPOCH_LEN = 25;
 
+// Compute a nonzero row shift for the logical matrix rotation.
 static std::size_t compute_shift_rows(std::size_t n) {
     std::size_t shift = n / 16 + 17;
     if ((shift % 2) == 0) {
@@ -94,6 +94,7 @@ static void parallel_for_workers(
     std::vector<std::future<void>> completions;
     completions.reserve(worker_count);
 
+    // Partition the work into contiguous static ranges, submit one task per range,
     for (std::size_t worker = 0; worker < worker_count; ++worker) {
         const std::size_t begin = item_count * worker / worker_count;
         const std::size_t end   = item_count * (worker + 1) / worker_count;
@@ -103,16 +104,18 @@ static void parallel_for_workers(
                 function(begin, end);
             }));
     }
-
+    // and wait for all tasks to complete.
     for (auto& completion : completions) {
         completion.get();
     }
 }
 
+// Separate partial sums by cache line to reduce false sharing.
 struct alignas(64) PaddedDouble {
     double value = 0.0;
 };
 
+// Vector operations
 static double dot(
     const std::vector<double>& a,
     const std::vector<double>& b,
@@ -128,10 +131,13 @@ static double dot(
     std::vector<std::future<void>> completions;
     completions.reserve(worker_count);
 
+    // Splitting vectors into contiguous intervals
     for (std::size_t worker = 0; worker < worker_count; ++worker) {
         const std::size_t begin = a.size() * worker / worker_count;
         const std::size_t end   = a.size() * (worker + 1) / worker_count;
 
+        // Each task calculates the dot product for its assigned interval 
+        // and saves the result in partial
         completions.emplace_back(pool.submit(
             [&a, &b, &partial, worker, begin, end] {
                 double local = 0.0;
@@ -156,11 +162,14 @@ static double dot(
     return total;
 }
 
+// Scale independent vector ranges using the existing thread pool.
 static void parallel_scale(
     std::vector<double>& vector,
     double factor,
     ThreadPool& pool,
     std::size_t worker_count)
+    // Statically partitions the vector and multiplies the elements by the scale factor
+    // using the existing thread pool.
 {
     parallel_for_workers(
         pool,
@@ -173,6 +182,7 @@ static void parallel_scale(
         });
 }
 
+// Compute the vector norm, then scale all elements by its inverse.
 static void normalize(
     std::vector<double>& vector,
     ThreadPool& pool,
@@ -188,6 +198,7 @@ static void normalize(
         worker_count);
 }
 
+// Multiply shifted CSR rows by x using dynamically assigned chunks.
 static void spmv_csr_shifted_rows(
     const CSRMatrix& matrix,
     std::size_t row_shift,
@@ -204,20 +215,23 @@ static void spmv_csr_shifted_rows(
     if (y.size() != matrix.n) {
         y.resize(matrix.n);
     }
-
+    // Divide the logical rows into chunks for dynamic scheduling.
     const std::size_t number_of_chunks =
         (matrix.n + chunk_size - 1) / chunk_size;
 
+    // Workers claim unique chunk IDs; relaxed ordering is sufficient.
     std::atomic<std::size_t> next_chunk{0};
     std::vector<std::future<void>> completions;
     completions.reserve(worker_count);
 
+    // Submit one job per worker, allowing each to process multiple chunks.
     for (std::size_t worker = 0; worker < worker_count; ++worker) {
         completions.emplace_back(pool.submit(
             [&matrix, row_shift, &x, &y,
              &next_chunk, number_of_chunks, chunk_size] {
                 
                 while (true) {
+                    // Atomically claim the next chunk without requiring synchronization of other data.
                     const std::size_t chunk =
                         next_chunk.fetch_add(1, std::memory_order_relaxed);
 
@@ -233,11 +247,13 @@ static void spmv_csr_shifted_rows(
                          logical_row < end;
                          ++logical_row) {
 
+                        // Map each logical row to its CSR source without moving matrix data.
                         const std::size_t source_row =
                             (logical_row + matrix.n - row_shift) % matrix.n;
 
                         double sum = 0.0;
 
+                        // Traverse the non-zero elements of the selected CSR row.
                         for (std::uint64_t position =
                                  matrix.row_ptr[source_row];
                              position < matrix.row_ptr[source_row + 1];
@@ -253,6 +269,7 @@ static void spmv_csr_shifted_rows(
             }));
     }
 
+    // Wait for all worker jobs before using the resulting vector.
     for (auto& completion : completions) {
         completion.get();
     }
@@ -264,6 +281,7 @@ struct IterativeResult {
     std::size_t final_row_shift = 0;
 };
 
+// Repeatedly perform shifted SpMV and normalize the evolving vector.
 static IterativeResult iterative_spmv_evolving(const CSRMatrix& A,
                                                std::uint64_t seed,
                                                ThreadPool& pool,

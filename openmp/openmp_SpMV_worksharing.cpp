@@ -5,7 +5,7 @@
 //   - all threads cooperate on the iterative computation;
 //   - dot product and vector scaling use static work-sharing;
 //   - SpMV uses dynamic work-sharing to balance the irregular workload;
-//   - implicit OpenMP barriers synchronize the different computation phases.
+//   - OpenMP barriers synchronize the different computation phases.
 //
 // Command line:
 //   -n  N          matrix size, NxN
@@ -32,7 +32,7 @@
 //   - Dot product and vector scaling use static work-sharing.
 //   - SpMV uses dynamic work-sharing managed by the OpenMP runtime.
 //   - The computation uses a fixed number of iterations.
-//   - The main workload is the irregular case.
+//   - Both regular and irregular workloads are supported; irregular is the main benchmark case.
 
 #include <algorithm>
 #include <chrono>
@@ -55,6 +55,7 @@ static constexpr std::uint32_t NUM_ITERS = 500;
 static constexpr std::uint32_t EPOCH_LEN = 25;
 
 static std::size_t compute_shift_rows(std::size_t n) {
+    // Choose an initially odd circular offset and avoid a zero shift between epochs.
     std::size_t shift = n / 16 + 17;
     if ((shift % 2) == 0) {
         ++shift;
@@ -70,8 +71,7 @@ struct alignas(64) PaddedDouble {
     double value = 0.0;
 };
 
-// Static work-sharing.
-// This function must be called by all threads from inside an OpenMP parallel region.
+// Work-sharing helpers must be called collectively by all OpenMP threads.
 static void dot(
     const std::vector<double>& a,
     const std::vector<double>& b,
@@ -83,6 +83,7 @@ static void dot(
 
     double local = 0.0;
 
+    // Statically distribute dot-product elements; each thread computes a partial sum.
     #pragma omp for schedule(static) nowait
     for (std::size_t i = 0; i < a.size(); ++i) {
         local += a[i] * b[i];
@@ -90,8 +91,10 @@ static void dot(
 
     partial[thread_id].value = local;
 
+    // Wait until every thread has stored its partial sum before reducing.
     #pragma omp barrier
 
+    // Combine partial results once; the implicit barrier makes the total visible.
     #pragma omp single
     {
         total = 0.0;
@@ -102,19 +105,17 @@ static void dot(
     }
 }
 
-// Static work-sharing.
-// This function must be called by all threads from inside an OpenMP parallel region.
 static void parallel_scale(
     std::vector<double>& vector,
     double factor)
 {
+    // Statically distribute vector scaling; the implicit barrier completes the phase.
     #pragma omp for schedule(static)
     for (std::size_t i = 0; i < vector.size(); ++i) {
         vector[i] *= factor;
     }
 }
 
-// This function must be called by all threads from inside an OpenMP parallel region.
 static void normalize(
     std::vector<double>& vector,
     std::vector<PaddedDouble>& partial,
@@ -126,6 +127,7 @@ static void normalize(
         partial,
         norm);
 
+    // Compute the norm once, then synchronize before applying the scale factor.
     #pragma omp single
     {
         norm = std::sqrt(norm);
@@ -138,11 +140,6 @@ static void normalize(
         factor);
 }
 
-// Work-sharing SpMV.
-// Rows are distributed dynamically among OpenMP threads.
-// Dynamic scheduling is useful for the irregular workload because
-// different rows may contain very different numbers of nonzeros.
-// This function must be called by all threads from inside an OpenMP parallel region.
 static void spmv_csr_shifted_rows(
     const CSRMatrix& matrix,
     std::size_t row_shift,
@@ -150,16 +147,19 @@ static void spmv_csr_shifted_rows(
     std::vector<double>& y,
     std::size_t chunk_size)
 {
+    // Dynamically assign row chunks to balance irregular NNZ costs; implicit barrier completes SpMV.
     #pragma omp for schedule(dynamic, chunk_size)
     for (std::size_t logical_row = 0;
          logical_row < matrix.n;
          ++logical_row) {
 
+        // Map each logical row to its CSR source without moving matrix data.
         const std::size_t source_row =
             (logical_row + matrix.n - row_shift) % matrix.n;
 
         double sum = 0.0;
 
+        // Traverse the non-zero elements of the selected CSR row.
         for (std::uint64_t position = matrix.row_ptr[source_row];
              position < matrix.row_ptr[source_row + 1];
              ++position) {
@@ -188,26 +188,24 @@ static IterativeResult iterative_spmv_evolving(
     const std::size_t n = A.n;
     const std::size_t shift_rows = compute_shift_rows(n);
 
-    // PHASE 1: preserve exactly the same sequential RNG initialization.
     std::vector<double> x(n);
     std::vector<double> y(n);
 
+    // Reproduce the same initial vector as the sequential implementation.
     SplitMix64 rng(seed ^ 0x123456789abcdef0ULL);
     for (double& v : x) {
         v = rng.next_unit();
     }
 
-    // Values produced inside the OpenMP region and returned afterwards.
     std::size_t row_shift = 0;
     double rayleigh = 0.0;
     double norm = 0.0;
     std::uint64_t checksum = 0;
 
-    // One partial result per OpenMP thread.
+    // Keep per-thread partial sums on separate cache lines to reduce false sharing.
     std::vector<PaddedDouble> partial(worker_count);
 
-    // Persistent OpenMP team: created once and reused for normalization,
-    // every SpMV iteration, and the final diagnostics.
+    // Create one OpenMP team reused throughout all iterations and diagnostics.
     #pragma omp parallel num_threads(worker_count) default(none) \
         shared(A, x, y, row_shift, rayleigh, norm, checksum, partial, \
                shift_rows, n, chunk_size)
@@ -218,18 +216,17 @@ static IterativeResult iterative_spmv_evolving(
             partial,
             norm);
 
-        // PHASE 2: iterative computation on the evolving matrix.
         for (std::uint32_t iter = 0; iter < NUM_ITERS; ++iter) {
 
-            // The row shift changes only at epoch boundaries.
+            // Evolve the matrix through a logical shift without moving CSR data.
             if (iter > 0 && (iter % EPOCH_LEN) == 0) {
+                // Update the shared shift once; the implicit barrier synchronizes all threads.
                 #pragma omp single
                 {
                     row_shift = (row_shift + shift_rows) % n;
                 }
             }
 
-            // All threads cooperate on the SpMV through dynamic work-sharing.
             spmv_csr_shifted_rows(
                 A,
                 row_shift,
@@ -237,20 +234,19 @@ static IterativeResult iterative_spmv_evolving(
                 y,
                 chunk_size);
 
-            // All threads cooperate on normalization.
             normalize(
                 y,
                 partial,
                 norm);
 
-            // Only one thread swaps the shared vectors.
+            // Swap shared vectors only after all work-sharing phases have completed.
             #pragma omp single
             {
                 x.swap(y);
             }
         }
 
-        // PHASE 3: final diagnostics for correctness checks.
+        // Compute final diagnostics using the evolved matrix and final vector.
         spmv_csr_shifted_rows(
             A,
             row_shift,
@@ -264,8 +260,7 @@ static IterativeResult iterative_spmv_evolving(
             partial,
             rayleigh);
 
-        // Preserve the checksum implementation used by the task-based code.
-        // It is executed by one thread.
+        // Compute the checksum only once after the final dot product.
         #pragma omp single
         {
             checksum = checksum_vector(x);
@@ -301,7 +296,6 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    // Optional arguments
     (void)read_arg_u64(argc, argv, "-s", seed);
     (void)read_arg_u64(argc, argv, "-b", block_size64);
     (void)read_arg_str(argc, argv, "--dump-vector", dump_vector_path);
@@ -352,8 +346,7 @@ int main(int argc, char** argv) {
         std::cout << std::fixed << std::setprecision(6);
         std::cout << "Time (sec) = " << computation_sec << "\n";
 
-        // Phase 3: optional correctness support. Vector dumping is outside
-        // the timed region.
+        // Phase 3: optional vector dumping outside the timed region.
         if (!dump_vector_path.empty()) {
             dump_vector(dump_vector_path, final_vector);
             std::cout << "vector_dump=" << dump_vector_path << "\n";

@@ -1,3 +1,4 @@
+
 #pragma once
 
 #include <condition_variable>
@@ -13,13 +14,10 @@
 #include <utility>
 #include <vector>
 
-// Fixed-size thread pool used by the C++ threads implementation.
-//
-// Synchronization model:
-//   - a mutex protects the shared task queue and the shutdown flag;
-//   - worker threads sleep on a condition_variable while the queue is empty;
-//   - submit() returns a future for each task;
-//   - callers synchronize phases by invoking get() on all corresponding futures.
+// Fixed-size blocking thread pool.
+// A mutex protects the shared task queue and shutdown flag.
+// Idle workers sleep on a condition variable instead of busy waiting.
+// Tasks return futures, allowing callers to wait for their results.
 class ThreadPool {
 public:
     explicit ThreadPool(std::size_t worker_count) {
@@ -28,6 +26,8 @@ public:
         }
 
         workers_.reserve(worker_count);
+
+        // Create workers once each repeatedly processes queued tasks.
         for (std::size_t worker_id = 0; worker_id < worker_count; ++worker_id) {
             workers_.emplace_back([this] { worker_loop(); });
         }
@@ -38,12 +38,15 @@ public:
 
     ~ThreadPool() {
         {
+            // Protect the shutdown flag shared with workers.
             std::lock_guard<std::mutex> lock(queue_mutex_);
             stopping_ = true;
         }
 
+        // Wake all workers so they can finish pending tasks and exit
         task_available_.notify_all();
 
+        // Wait for every worker to terminate before destruction
         for (std::thread& worker : workers_) {
             if (worker.joinable()) {
                 worker.join();
@@ -60,12 +63,14 @@ public:
         -> std::future<std::invoke_result_t<Function, Args...>> {
         using Result = std::invoke_result_t<Function, Args...>;
 
+        // Wrap the task to capture its result or exception through a future.
         auto packaged = std::make_shared<std::packaged_task<Result()>>(
             std::bind(std::forward<Function>(function), std::forward<Args>(args)...));
 
         std::future<Result> future = packaged->get_future();
 
         {
+            // Protect queue access from concurrent submissions and workers.
             std::lock_guard<std::mutex> lock(queue_mutex_);
             if (stopping_) {
                 throw std::runtime_error("cannot submit a task to a stopped ThreadPool");
@@ -74,6 +79,7 @@ public:
             tasks_.emplace_back([packaged] { (*packaged)(); });
         }
 
+        // Notify one worker that a new task is available.
         task_available_.notify_one();
         return future;
     }
@@ -84,19 +90,26 @@ private:
             std::function<void()> task;
 
             {
+                // unique_lock lets wait() release and reacquire the mutex.
                 std::unique_lock<std::mutex> lock(queue_mutex_);
+
+                // Sleep until work arrives or shutdown begins.
+                // The predicate also handles spurious wakeups.
                 task_available_.wait(lock, [this] {
                     return stopping_ || !tasks_.empty();
                 });
 
+                // Exit only when shutdown is requested and the queue is empty.
                 if (stopping_ && tasks_.empty()) {
                     return;
                 }
 
+                // Remove one task under the mutex to prevent concurrent access.
                 task = std::move(tasks_.front());
                 tasks_.pop_front();
             }
 
+            // Execute outside the lock so other workers can run concurrently.
             task();
         }
     }
