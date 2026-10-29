@@ -198,7 +198,7 @@ static void normalize(
         worker_count);
 }
 
-// Multiply shifted CSR rows by x using dynamically assigned chunks.
+ // Compute SpMV using chunks shared dynamically between workers.
 static void spmv_csr_shifted_rows(
     const CSRMatrix& matrix,
     std::size_t row_shift,
@@ -215,61 +215,71 @@ static void spmv_csr_shifted_rows(
     if (y.size() != matrix.n) {
         y.resize(matrix.n);
     }
-    // Divide the logical rows into chunks for dynamic scheduling.
+
+    // Calculate how many chunks are needed.
     const std::size_t number_of_chunks =
         (matrix.n + chunk_size - 1) / chunk_size;
 
-    // Workers claim unique chunk IDs; relaxed ordering is sufficient.
+    // Atomic counter: each worker gets a different chunk.
     std::atomic<std::size_t> next_chunk{0};
+
+    // Store the futures to wait for the workers.
     std::vector<std::future<void>> completions;
     completions.reserve(worker_count);
 
-    // Submit one job per worker, allowing each to process multiple chunks.
+    // Give one job to each worker.
     for (std::size_t worker = 0; worker < worker_count; ++worker) {
         completions.emplace_back(pool.submit(
             [&matrix, row_shift, &x, &y,
              &next_chunk, number_of_chunks, chunk_size] {
-                
+
+                // Each worker keeps taking chunks until none are left
                 while (true) {
-                    // Atomically claim the next chunk without requiring synchronization of other data.
+
+                    // Get the next chunk and increase the counter by 1
                     const std::size_t chunk =
                         next_chunk.fetch_add(1, std::memory_order_relaxed);
 
+                    // Stop when all chunks have been assigned.
                     if (chunk >= number_of_chunks) {
                         break;
                     }
 
+                    // Find the first and last row of this chunk.
                     const std::size_t begin = chunk * chunk_size;
                     const std::size_t end =
                         std::min(begin + chunk_size, matrix.n);
 
+                    // Process all rows in the chunk.
                     for (std::size_t logical_row = begin;
                          logical_row < end;
                          ++logical_row) {
 
-                        // Map each logical row to its CSR source without moving matrix data.
+                        // Find the original CSR row using row_shift.
+                        // The matrix is not physically moved.
                         const std::size_t source_row =
                             (logical_row + matrix.n - row_shift) % matrix.n;
 
                         double sum = 0.0;
 
-                        // Traverse the non-zero elements of the selected CSR row.
+                        // Multiply the non-zero values by the matching x values.
                         for (std::uint64_t position =
                                  matrix.row_ptr[source_row];
                              position < matrix.row_ptr[source_row + 1];
                              ++position) {
-                            
+
                             sum += matrix.values[position] *
                                    x[matrix.col_idx[position]];
                         }
 
+                        // Save the result in the output vector.
                         y[logical_row] = sum;
                     }
                 }
             }));
     }
 
-    // Wait for all worker jobs before using the resulting vector.
+    // Wait until all workers have finished.
     for (auto& completion : completions) {
         completion.get();
     }
