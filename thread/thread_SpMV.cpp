@@ -96,7 +96,7 @@ static void parallel_for_workers(
     std::vector<std::future<void>> completions;
     completions.reserve(worker_count);
 
-    // Partition the work into contiguous static ranges, submit one task per range,
+    // Partition the work into contiguous static ranges, submit one task per range to threadpool
     for (std::size_t worker = 0; worker < worker_count; ++worker) {
         const std::size_t begin = item_count * worker / worker_count;
         const std::size_t end   = item_count * (worker + 1) / worker_count;
@@ -160,7 +160,7 @@ static double dot(
     for (const auto& value : partial) {
         total += value.value;
     }
-
+    // Sum of all worker
     return total;
 }
 
