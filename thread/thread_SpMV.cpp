@@ -47,6 +47,8 @@
 //   - SpMV uses dynamic chunk scheduling.
 //   - The computation uses a fixed number of iterations.
 //   - The main workload is the irregular case.
+//
+// Best Parameters: srun --partition=normal --nodes=1 --ntasks=1 --cpus-per-task=32  --time=00:15:00 ./thread_SpMV -n 1000000 -nz 200000000 -m irregular -s 111 -t 32 -b 1024
 
 #include <algorithm>
 #include <chrono>
@@ -193,7 +195,7 @@ static void normalize(
 
     parallel_scale(
         vector,
-        1.0 / norm,
+        1.0 / norm, //factor
         pool,
         worker_count);
 }

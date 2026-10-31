@@ -33,6 +33,8 @@
 //   - SpMV uses dynamic work-sharing managed by the OpenMP runtime.
 //   - The computation uses a fixed number of iterations.
 //   - Both regular and irregular workloads are supported; irregular is the main benchmark case.
+//
+// Best parameters: srun --partition=normal --nodes=1 --ntasks=1 --cpus-per-task=32 --time=00:15:00 ./openmp_SpMV_worksharing -n 1000000 -nz 200000000 -m irregular -s 111 -t 32 -b 1024
 
 #include <algorithm>
 #include <chrono>

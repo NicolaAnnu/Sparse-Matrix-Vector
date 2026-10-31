@@ -16,6 +16,9 @@
 //   - Matrix generation is not included in computation time.
 //   - The computation uses a fixed number of iterations.
 //   - The main workload is the irregular case.
+//
+// Best parameters:
+// srun --partition=normal --nodes=8 --ntasks=8 --ntasks-per-node=1 --cpus-per-task=16 --mpi=pmix --time=00:15:00 ./mpi -n 1000000 -nz 200000000 -m irregular -s 111 -t 16 -b 2048
 
 #include <algorithm>
 #include <chrono>
