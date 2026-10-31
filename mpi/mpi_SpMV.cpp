@@ -294,7 +294,7 @@ static IterativeResult distributed_iterative_spmv(
                  ptr_counts.data(), ptr_displacements.data(), MPI_UINT64_T,
                  local_row_ptr.data(), local_n + 1, MPI_UINT64_T, 0, MPI_COMM_WORLD);
 
-    // Convert global CSR offsets into local offsets starting from zero.
+    // Convert global CSR offsets into local offsets starting from zero to correctly index local_values and local_col_idx
     const std::uint64_t offset = local_row_ptr[0];
     for (auto& p : local_row_ptr) p -= offset;
 
