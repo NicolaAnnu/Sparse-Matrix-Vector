@@ -147,7 +147,7 @@ static double local_spmv_csr(
         {
             double local_norm = 0.0;
 
-            // Traverse the non-zero elements of the current CSR row.
+            // Accumulate the sums of the squares of the results which are necessary for global normalization.
             for (std::size_t row = begin; row < end; ++row) {
                 double sum = 0.0;
 
@@ -166,7 +166,7 @@ static double local_spmv_csr(
         }
     }
 
-    // Ensure all SpMV tasks have completed before combining partial norms.
+    // Sum the contributions of all the chunk to the MPI process
     #pragma omp taskwait
 
     double norm2 = 0.0;
