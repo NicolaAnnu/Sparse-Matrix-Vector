@@ -63,6 +63,8 @@ static double dot(const std::vector<double>& a,
     if (a.empty()) return 0.0;
      // Limit the number of tasks to the vector size and allocate padded partial sums.
     worker_count = std::min(worker_count, a.size());
+    // Create a partial element for each OpenMP task. 
+    // Each task calculates the sum of the products within its own interval
     std::vector<PaddedDouble> partial(worker_count);
 
     for (std::size_t worker = 0; worker < worker_count; ++worker) {
